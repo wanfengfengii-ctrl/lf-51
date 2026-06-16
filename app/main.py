@@ -61,7 +61,8 @@ async def create_container(
                 "name": name, "shape": shape, "capacity": capacity,
                 "orifice_diameter": orifice_diameter,
                 "initial_water_level": initial_water_level,
-                "description": description, "shape_params": shape_params
+                "description": description if description is not None else '',
+                "shape_params": shape_params if shape_params is not None else ''
             }
         })
 
@@ -131,7 +132,14 @@ async def update_container(
         return templates.TemplateResponse("container_form.html", {
             "request": request,
             "container": container,
-            "errors": errors
+            "errors": errors,
+            "form_data": {
+                "name": name, "shape": shape, "capacity": capacity,
+                "orifice_diameter": orifice_diameter,
+                "initial_water_level": initial_water_level,
+                "description": description if description is not None else '',
+                "shape_params": shape_params if shape_params is not None else ''
+            }
         })
 
     param_changed = (
@@ -233,7 +241,12 @@ async def create_experiment(
         return templates.TemplateResponse("experiment_form.html", {
             "request": request, "container": container, "experiment": None,
             "errors": errors,
-            "form_data": {"name": name, "notes": notes, "time_points": time_points, "water_levels": water_levels}
+            "form_data": {
+                "name": name,
+                "notes": notes if notes is not None else '',
+                "time_points": time_points,
+                "water_levels": water_levels
+            }
         })
 
     db_exp = models.Experiment(container_id=container_id, name=name, notes=notes)
@@ -310,7 +323,7 @@ async def create_scheme(
             "form_data": {"name": name, "scale_count": scale_count,
                           "time_interval": time_interval,
                           "error_threshold": error_threshold,
-                          "description": description}
+                          "description": description if description is not None else ''}
         })
 
     marks = physics.generate_scale_marks(

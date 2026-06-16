@@ -41,7 +41,7 @@
             <div class="form-group">
                 <label>描述</label>
                 <input type="text" name="description"
-                       value="{% if form_data %}{{ form_data.description }}{% elif scheme %}{{ scheme.description }}{% endif %}"
+                       value="{% if form_data %}{{ form_data.description if form_data.description is not none else '' }}{% elif scheme %}{{ scheme.description if scheme.description is not none else '' }}{% endif %}"
                        placeholder="可选：方案说明">
             </div>
         </div>

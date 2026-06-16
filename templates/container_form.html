@@ -49,9 +49,16 @@
                    placeholder="不能超过容器容量">
             <p class="help-text">初始水位必须大于0且不超过容器容量</p>
         </div>
-        <div class="form-group">
-            <label>描述</label>
-            <textarea name="description" rows="3" placeholder="可选：漏壶的历史背景、来源等信息">{% if form_data %}{{ form_data.description }}{% elif container %}{{ container.description }}{% endif %}</textarea>
+        <div class="form-row">
+            <div class="form-group">
+                <label>容器形状参数 (JSON)</label>
+                <textarea name="shape_params" rows="3" placeholder="可选：自定义形状参数，JSON 格式，例如：{&quot;radius&quot;: 10, &quot;height&quot;: 50}">{% if form_data %}{{ form_data.shape_params if form_data.shape_params is not none else '' }}{% elif container %}{{ container.shape_params if container.shape_params is not none else '' }}{% endif %}</textarea>
+                <p class="help-text">用于非标准形状的自定义参数描述</p>
+            </div>
+            <div class="form-group">
+                <label>描述</label>
+                <textarea name="description" rows="3" placeholder="可选：漏壶的历史背景、来源等信息">{% if form_data %}{{ form_data.description if form_data.description is not none else '' }}{% elif container %}{{ container.description if container.description is not none else '' }}{% endif %}</textarea>
+            </div>
         </div>
         <div class="form-actions">
             <button type="submit" class="btn btn-primary">{% if container %}保存修改{% else %}创建漏壶{% endif %}</button>

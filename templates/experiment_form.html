@@ -32,7 +32,7 @@
 
         <div class="form-group">
             <label>备注</label>
-            <textarea name="notes" rows="3" placeholder="可选：实验环境、设备、注意事项等">{% if form_data %}{{ form_data.notes }}{% elif experiment %}{{ experiment.notes }}{% endif %}</textarea>
+            <textarea name="notes" rows="3" placeholder="可选：实验环境、设备、注意事项等">{% if form_data %}{{ form_data.notes if form_data.notes is not none else '' }}{% elif experiment %}{{ experiment.notes if experiment.notes is not none else '' }}{% endif %}</textarea>
         </div>
 
         <div class="alert alert-info">
