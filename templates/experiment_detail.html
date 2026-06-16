@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}{{ experiment.name }} - 实验详情{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>{{ experiment.name }}</h2>
+    <div>
+        <a href="/containers/{{ container.id }}" class="btn btn-secondary">返回漏壶详情</a>
+        <form method="post" action="/experiments/{{ experiment.id }}/delete" class="inline-form" onsubmit="return confirm('确定要删除此实验吗？');">
+            <button type="submit" class="btn btn-danger">删除实验</button>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <h3>实验信息</h3>
+    <div class="info-grid">
+        <div class="info-item">
+            <div class="label">所属漏壶</div>
+            <div class="value">{{ container.name }}</div>
+        </div>
+        <div class="info-item">
+            <div class="label">数据点数</div>
+            <div class="value">{{ experiment.data_points|length }}</div>
+        </div>
+        <div class="info-item">
+            <div class="label">创建时间</div>
+            <div class="value">{{ experiment.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+        </div>
+    </div>
+    {% if experiment.notes %}
+    <p><strong>备注：</strong>{{ experiment.notes }}</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>实验数据对比</h3>
+    <div id="experimentPlot" class="plot-container"></div>
+</div>
+
+<div class="card">
+    <h3>数据点明细</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>序号</th>
+                <th>时间点 (秒)</th>
+                <th>水位</th>
+                <th>相邻时间间隔 (秒)</th>
+                <th>水位变化</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for dp in experiment.data_points %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ dp.time_point }}</td>
+                <td>{{ dp.water_level }}</td>
+                <td>
+                    {% if loop.index0 > 0 %}
+                    {{ (dp.time_point - experiment.data_points[loop.index0-1].time_point)|round(2) }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if loop.index0 > 0 %}
+                    {{ (dp.water_level - experiment.data_points[loop.index0-1].water_level)|round(4) }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadExperimentPlot() {
+    const [expResp, curveResp] = await Promise.all([
+        fetch(`/api/experiments/{{ experiment.id }}/data`),
+        fetch(`/api/containers/{{ container.id }}/water_curve`)
+    ]);
+    const expData = await expResp.json();
+    const curveData = await curveResp.json();
+
+    const traces = [
+        {
+            x: curveData.times,
+            y: curveData.levels,
+            mode: 'lines',
+            name: '理论曲线',
+            line: { color: '#3182ce', width: 2 }
+        },
+        {
+            x: expData.times,
+            y: expData.levels,
+            mode: 'markers',
+            name: '实验数据',
+            marker: { color: '#e53e3e', size: 10, symbol: 'circle' }
+        }
+    ];
+
+    const layout = {
+        title: '实验数据 vs 理论曲线',
+        xaxis: { title: '时间 (秒)', gridcolor: '#e2e8f0' },
+        yaxis: { title: '水位', gridcolor: '#e2e8f0' },
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        legend: { x: 0, y: 1 },
+        margin: { t: 50, r: 30, b: 50, l: 50 },
+        hovermode: 'closest'
+    };
+
+    Plotly.newPlot('experimentPlot', traces, layout, { responsive: true });
+}
+
+loadExperimentPlot();
+</script>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{% if scheme %}编辑{% else %}新建{% endif %}刻度方案 - {{ container.name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>{% if scheme %}编辑{% else %}新建{% endif %}刻度方案 - {{ container.name }}</h2>
+    <a href="/containers/{{ container.id }}" class="btn btn-secondary">返回漏壶详情</a>
+</div>
+
+<div class="card">
+    <form method="post" action="/containers/{{ container.id }}/schemes">
+        <div class="form-group">
+            <label>方案名称 *</label>
+            <input type="text" name="name" required maxlength="200"
+                   value="{% if form_data %}{{ form_data.name }}{% elif scheme %}{{ scheme.name }}{% endif %}"
+                   placeholder="例如：百刻制 - 均匀间隔">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>刻度数量 *</label>
+                <input type="number" name="scale_count" required min="1"
+                       value="{% if form_data %}{{ form_data.scale_count }}{% elif scheme %}{{ scheme.scale_count }}{% else %}100{% endif %}"
+                       placeholder="例如：100">
+                <p class="help-text">刻度总数量，必须大于0</p>
+            </div>
+            <div class="form-group">
+                <label>每刻度时间间隔 (秒) *</label>
+                <input type="number" name="time_interval" required step="any" min="0.01"
+                       value="{% if form_data %}{{ form_data.time_interval }}{% elif scheme %}{{ scheme.time_interval }}{% else %}60{% endif %}"
+                       placeholder="例如：60">
+                <p class="help-text">每个刻度代表的理论时间，必须大于0</p>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>误差阈值 (秒)</label>
+                <input type="number" name="error_threshold" step="any" min="0.01"
+                       value="{% if form_data %}{{ form_data.error_threshold }}{% elif scheme %}{{ scheme.error_threshold }}{% else %}5{% endif %}"
+                       placeholder="例如：5">
+                <p class="help-text">超过此阈值的刻度段将被突出显示，必须大于0</p>
+            </div>
+            <div class="form-group">
+                <label>描述</label>
+                <input type="text" name="description"
+                       value="{% if form_data %}{{ form_data.description }}{% elif scheme %}{{ scheme.description }}{% endif %}"
+                       placeholder="可选：方案说明">
+            </div>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>提示：</strong>
+            <ul style="margin-left: 20px; margin-top: 10px;">
+                <li>系统将基于漏壶物理参数自动计算每个刻度对应的实际水位位置</li>
+                <li>总时长 = 刻度数量 × 时间间隔</li>
+                <li>修改漏壶参数后，已有方案会被标记为"待复核"，需重新计算</li>
+            </ul>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">生成刻度方案</button>
+            <a href="/containers/{{ container.id }}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

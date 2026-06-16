@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{% if container %}编辑{% else %}创建{% endif %}漏壶 - 漏壶刻度研究系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>{% if container %}编辑{% else %}创建{% endif %}漏壶模型</h2>
+    <a href="/" class="btn btn-secondary">返回列表</a>
+</div>
+
+<div class="card">
+    <form method="post" action="{% if container %}/containers/{{ container.id }}/update{% else %}/containers{% endif %}">
+        <div class="form-row">
+            <div class="form-group">
+                <label>漏壶名称 *</label>
+                <input type="text" name="name" required maxlength="200"
+                       value="{% if form_data %}{{ form_data.name }}{% elif container %}{{ container.name }}{% endif %}"
+                       placeholder="例如：汉代铜壶">
+            </div>
+            <div class="form-group">
+                <label>容器形状 *</label>
+                <select name="shape" required>
+                    <option value="">请选择形状</option>
+                    <option value="cylindrical" {% if (form_data and form_data.shape == 'cylindrical') or (container and container.shape == 'cylindrical') %}selected{% endif %}>圆柱形</option>
+                    <option value="conical" {% if (form_data and form_data.shape == 'conical') or (container and container.shape == 'conical') %}selected{% endif %}>圆锥形（上宽下窄）</option>
+                    <option value="inverted_conical" {% if (form_data and form_data.shape == 'inverted_conical') or (container and container.shape == 'inverted_conical') %}selected{% endif %}>倒圆锥形（下宽上窄）</option>
+                    <option value="spherical" {% if (form_data and form_data.shape == 'spherical') or (container and container.shape == 'spherical') %}selected{% endif %}>球形</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>容器容量 *</label>
+                <input type="number" name="capacity" required step="any" min="0.01"
+                       value="{% if form_data %}{{ form_data.capacity }}{% elif container %}{{ container.capacity }}{% endif %}"
+                       placeholder="单位：任意一致即可">
+                <p class="help-text">容器容量必须大于0</p>
+            </div>
+            <div class="form-group">
+                <label>出水孔径 *</label>
+                <input type="number" name="orifice_diameter" required step="any" min="0.01"
+                       value="{% if form_data %}{{ form_data.orifice_diameter }}{% elif container %}{{ container.orifice_diameter }}{% endif %}"
+                       placeholder="单位：与容量一致">
+                <p class="help-text">出水孔径必须大于0</p>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>初始水位 *</label>
+            <input type="number" name="initial_water_level" required step="any" min="0.01"
+                   value="{% if form_data %}{{ form_data.initial_water_level }}{% elif container %}{{ container.initial_water_level }}{% endif %}"
+                   placeholder="不能超过容器容量">
+            <p class="help-text">初始水位必须大于0且不超过容器容量</p>
+        </div>
+        <div class="form-group">
+            <label>描述</label>
+            <textarea name="description" rows="3" placeholder="可选：漏壶的历史背景、来源等信息">{% if form_data %}{{ form_data.description }}{% elif container %}{{ container.description }}{% endif %}</textarea>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">{% if container %}保存修改{% else %}创建漏壶{% endif %}</button>
+            <a href="/" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

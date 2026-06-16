@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}{{ scheme.name }} - 刻度方案详情{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>{{ scheme.name }}</h2>
+    <div>
+        <a href="/containers/{{ container.id }}/compare" class="btn btn-success">方案对比</a>
+        <a href="/containers/{{ container.id }}" class="btn btn-secondary">返回漏壶详情</a>
+        <form method="post" action="/schemes/{{ scheme.id }}/delete" class="inline-form" onsubmit="return confirm('确定要删除此刻度方案吗？');">
+            <button type="submit" class="btn btn-danger">删除方案</button>
+        </form>
+    </div>
+</div>
+
+{% if scheme.needs_review %}
+<div class="alert alert-warning">
+    <strong>⚠ 待复核：</strong>漏壶参数已被修改，此刻度方案的计算结果可能不准确。
+    <a href="/containers/{{ container.id }}/schemes/{{ scheme.id }}/recalculate" class="btn btn-sm btn-warning" style="margin-left: 15px;">重新计算</a>
+</div>
+{% endif %}
+
+<div class="stat-cards">
+    <div class="stat-card">
+        <div class="stat-value">{{ scheme.scale_count }}</div>
+        <div class="stat-label">刻度总数</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ scheme.time_interval }}s</div>
+        <div class="stat-label">每刻度间隔</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ (scheme.scale_count * scheme.time_interval)|round(1) }}s</div>
+        <div class="stat-label">总理论时长</div>
+    </div>
+    <div class="stat-card {% if scheme.scale_marks and scheme.scale_marks|selectattr('exceeds_threshold')|list|length > 0 %}danger{% else %}success{% endif %}">
+        <div class="stat-value">{{ scheme.scale_marks|selectattr('exceeds_threshold')|list|length }}</div>
+        <div class="stat-label">超阈值刻度</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>刻度-水位曲线</h3>
+    <div id="schemePlot" class="plot-container"></div>
+</div>
+
+<div class="card">
+    <h3>刻度误差分析</h3>
+    <div id="errorPlot" class="plot-container"></div>
+</div>
+
+<div class="card">
+    <h3>刻度明细表</h3>
+    <p class="help-text" style="margin-bottom: 15px;">红色高亮行表示误差超过阈值 ({{ scheme.error_threshold }}秒)</p>
+    <div style="max-height: 500px; overflow-y: auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>刻度</th>
+                    <th>理论时间 (秒)</th>
+                    <th>估算时间 (秒)</th>
+                    <th>对应水位</th>
+                    <th>误差 (秒)</th>
+                    <th>状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in scheme.scale_marks %}
+                <tr {% if m.exceeds_threshold %}class="highlight-error"{% endif %}>
+                    <td><strong>{{ m.scale_index }}</strong></td>
+                    <td>{{ m.theoretical_time|round(2) }}</td>
+                    <td>{{ m.estimated_time|round(2) }}</td>
+                    <td>{{ m.water_level|round(4) }}</td>
+                    <td>{{ m.error|round(4) }}</td>
+                    <td>
+                        {% if m.exceeds_threshold %}
+                        <span class="badge badge-danger">超阈值</span>
+                        {% else %}
+                        <span class="badge badge-success">正常</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadSchemePlots() {
+    const [marksResp, curveResp] = await Promise.all([
+        fetch(`/api/schemes/{{ scheme.id }}/marks`),
+        fetch(`/api/containers/{{ container.id }}/water_curve`)
+    ]);
+    const marksData = await marksResp.json();
+    const curveData = await curveResp.json();
+
+    const marks = marksData.marks;
+
+    const traces1 = [
+        {
+            x: curveData.times,
+            y: curveData.levels,
+            mode: 'lines',
+            name: '水位曲线',
+            line: { color: '#3182ce', width: 2 }
+        },
+        {
+            x: marks.map(m => m.estimated_time),
+            y: marks.map(m => m.water_level),
+            mode: 'markers',
+            name: '刻度位置',
+            marker: {
+                color: marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#38a169'),
+                size: 8,
+                symbol: 'diamond'
+            }
+        }
+    ];
+
+    const layout1 = {
+        title: '刻度位置在水位曲线上的分布',
+        xaxis: { title: '时间 (秒)', gridcolor: '#e2e8f0' },
+        yaxis: { title: '水位', gridcolor: '#e2e8f0' },
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        legend: { x: 0, y: 1 },
+        margin: { t: 50, r: 30, b: 50, l: 50 }
+    };
+
+    Plotly.newPlot('schemePlot', traces1, layout1, { responsive: true });
+
+    const errorColors = marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#3182ce');
+
+    const traces2 = [{
+        x: marks.map(m => m.scale_index),
+        y: marks.map(m => m.error),
+        type: 'bar',
+        marker: { color: errorColors },
+        name: '误差'
+    }];
+
+    const layout2 = {
+        title: '各刻度误差分布 (阈值: {{ scheme.error_threshold }}秒)',
+        xaxis: { title: '刻度序号', gridcolor: '#e2e8f0' },
+        yaxis: { title: '误差 (秒)', gridcolor: '#e2e8f0' },
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        shapes: [{
+            type: 'line',
+            x0: 0,
+            x1: marks.length,
+            y0: {{ scheme.error_threshold }},
+            y1: {{ scheme.error_threshold }},
+            line: { color: '#e53e3e', width: 2, dash: 'dash' }
+        }],
+        margin: { t: 50, r: 30, b: 50, l: 50 }
+    };
+
+    Plotly.newPlot('errorPlot', traces2, layout2, { responsive: true });
+}
+
+loadSchemePlots();
+</script>
+{% endblock %}

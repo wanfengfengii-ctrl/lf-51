@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}首页 - 漏壶刻度研究系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>漏壶模型列表</h2>
+    <a href="/containers/new" class="btn btn-primary">+ 创建新漏壶</a>
+</div>
+
+{% if containers %}
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>形状</th>
+                <th>容量</th>
+                <th>孔径</th>
+                <th>初始水位</th>
+                <th>实验数</th>
+                <th>刻度方案数</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in containers %}
+            <tr>
+                <td>{{ c.id }}</td>
+                <td><strong>{{ c.name }}</strong></td>
+                <td>
+                    {% if c.shape == 'cylindrical' %}圆柱形
+                    {% elif c.shape == 'conical' %}圆锥形
+                    {% elif c.shape == 'inverted_conical' %}倒圆锥形
+                    {% elif c.shape == 'spherical' %}球形
+                    {% else %}{{ c.shape }}
+                    {% endif %}
+                </td>
+                <td>{{ c.capacity }}</td>
+                <td>{{ c.orifice_diameter }}</td>
+                <td>{{ c.initial_water_level }}</td>
+                <td>{{ c.experiments|length }}</td>
+                <td>{{ c.scale_schemes|length }}</td>
+                <td>
+                    <div class="table-actions">
+                        <a href="/containers/{{ c.id }}" class="btn btn-sm btn-primary">查看</a>
+                        <a href="/containers/{{ c.id }}/edit" class="btn btn-sm btn-secondary">编辑</a>
+                        <form method="post" action="/containers/{{ c.id }}/delete" class="inline-form" onsubmit="return confirm('确定要删除此漏壶及相关数据吗？');">
+                            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <p>暂无漏壶模型，点击上方按钮创建第一个</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}{{ container.name }} - 漏壶详情{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>{{ container.name }}</h2>
+    <div>
+        <a href="/containers/{{ container.id }}/edit" class="btn btn-secondary">编辑漏壶</a>
+        <a href="/" class="btn btn-secondary">返回列表</a>
+    </div>
+</div>
+
+<div class="card">
+    <h3>漏壶参数</h3>
+    <div class="info-grid">
+        <div class="info-item">
+            <div class="label">容器形状</div>
+            <div class="value">
+                {% if container.shape == 'cylindrical' %}圆柱形
+                {% elif container.shape == 'conical' %}圆锥形
+                {% elif container.shape == 'inverted_conical' %}倒圆锥形
+                {% elif container.shape == 'spherical' %}球形
+                {% else %}{{ container.shape }}
+                {% endif %}
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">容器容量</div>
+            <div class="value">{{ container.capacity }}</div>
+        </div>
+        <div class="info-item">
+            <div class="label">出水孔径</div>
+            <div class="value">{{ container.orifice_diameter }}</div>
+        </div>
+        <div class="info-item">
+            <div class="label">初始水位</div>
+            <div class="value">{{ container.initial_water_level }}</div>
+        </div>
+    </div>
+    {% if container.description %}
+    <p><strong>描述：</strong>{{ container.description }}</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>理论水位下降曲线</h3>
+    <div id="waterCurvePlot" class="plot-container"></div>
+</div>
+
+<div class="page-header" style="margin-top: 30px;">
+    <h3>实验数据</h3>
+    <a href="/containers/{{ container.id }}/experiments/new" class="btn btn-primary">+ 新建实验</a>
+</div>
+
+<div class="card">
+    {% if experiments %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>实验名称</th>
+                <th>数据点数</th>
+                <th>创建时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for exp in experiments %}
+            <tr>
+                <td>{{ exp.id }}</td>
+                <td><strong>{{ exp.name }}</strong></td>
+                <td>{{ exp.data_points|length }}</td>
+                <td>{{ exp.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                    <div class="table-actions">
+                        <a href="/containers/{{ container.id }}/experiments/{{ exp.id }}" class="btn btn-sm btn-primary">查看</a>
+                        <form method="post" action="/experiments/{{ exp.id }}/delete" class="inline-form" onsubmit="return confirm('确定要删除此实验吗？');">
+                            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>暂无实验数据，点击上方按钮创建第一个实验</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="page-header" style="margin-top: 30px;">
+    <h3>刻度方案</h3>
+    <div>
+        <a href="/containers/{{ container.id }}/compare" class="btn btn-success">方案对比</a>
+        <a href="/containers/{{ container.id }}/schemes/new" class="btn btn-primary">+ 新建刻度方案</a>
+    </div>
+</div>
+
+<div class="card">
+    {% if schemes %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>方案名称</th>
+                <th>刻度数</th>
+                <th>时间间隔</th>
+                <th>误差阈值</th>
+                <th>状态</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in schemes %}
+            <tr>
+                <td>{{ s.id }}</td>
+                <td><strong>{{ s.name }}</strong></td>
+                <td>{{ s.scale_count }}</td>
+                <td>{{ s.time_interval }}s</td>
+                <td>{{ s.error_threshold }}s</td>
+                <td>
+                    {% if s.needs_review %}
+                    <span class="badge badge-warning">待复核</span>
+                    {% else %}
+                    <span class="badge badge-success">已确认</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="table-actions">
+                        <a href="/containers/{{ container.id }}/schemes/{{ s.id }}" class="btn btn-sm btn-primary">查看</a>
+                        <form method="post" action="/schemes/{{ s.id }}/delete" class="inline-form" onsubmit="return confirm('确定要删除此刻度方案吗？');">
+                            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>暂无刻度方案，点击上方按钮创建第一个方案</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadWaterCurve() {
+    const response = await fetch(`/api/containers/{{ container.id }}/water_curve`);
+    const data = await response.json();
+
+    const trace = {
+        x: data.times,
+        y: data.levels,
+        mode: 'lines',
+        name: '理论水位',
+        line: { color: '#3182ce', width: 3 }
+    };
+
+    const layout = {
+        title: '水位-时间曲线',
+        xaxis: { title: '时间 (秒)', gridcolor: '#e2e8f0' },
+        yaxis: { title: '水位', gridcolor: '#e2e8f0' },
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        margin: { t: 50, r: 30, b: 50, l: 50 },
+        hovermode: 'x unified'
+    };
+
+    Plotly.newPlot('waterCurvePlot', [trace], layout, { responsive: true });
+}
+
+loadWaterCurve();
+</script>
+{% endblock %}

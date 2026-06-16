@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}漏壶刻度研究系统{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <h1><a href="/">漏壶刻度研究系统</a></h1>
+            <p class="subtitle">古代水钟结构与刻度复原研究平台</p>
+        </div>
+    </header>
+    <main class="main">
+        <div class="container">
+            {% if errors %}
+            <div class="errors">
+                <h3>错误提示</h3>
+                <ul>
+                    {% for error in errors %}
+                    <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+    <footer class="footer">
+        <div class="container">
+            <p>漏壶刻度研究系统 - 基于 FastAPI + SQLite + Plotly.js</p>
+        </div>
+    </footer>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
