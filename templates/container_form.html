@@ -19,10 +19,10 @@
                 <label>容器形状 *</label>
                 <select name="shape" required>
                     <option value="">请选择形状</option>
-                    <option value="cylindrical" {% if (form_data and form_data.shape == 'cylindrical') or (container and container.shape == 'cylindrical') %}selected{% endif %}>圆柱形</option>
-                    <option value="conical" {% if (form_data and form_data.shape == 'conical') or (container and container.shape == 'conical') %}selected{% endif %}>圆锥形（上宽下窄）</option>
-                    <option value="inverted_conical" {% if (form_data and form_data.shape == 'inverted_conical') or (container and container.shape == 'inverted_conical') %}selected{% endif %}>倒圆锥形（下宽上窄）</option>
-                    <option value="spherical" {% if (form_data and form_data.shape == 'spherical') or (container and container.shape == 'spherical') %}selected{% endif %}>球形</option>
+                    <option value="cylindrical" {% if (form_data and form_data.shape == 'cylindrical') or (not form_data and container and container.shape == 'cylindrical') %}selected{% endif %}>圆柱形</option>
+                    <option value="conical" {% if (form_data and form_data.shape == 'conical') or (not form_data and container and container.shape == 'conical') %}selected{% endif %}>圆锥形（上宽下窄）</option>
+                    <option value="inverted_conical" {% if (form_data and form_data.shape == 'inverted_conical') or (not form_data and container and container.shape == 'inverted_conical') %}selected{% endif %}>倒圆锥形（下宽上窄）</option>
+                    <option value="spherical" {% if (form_data and form_data.shape == 'spherical') or (not form_data and container and container.shape == 'spherical') %}selected{% endif %}>球形</option>
                 </select>
             </div>
         </div>

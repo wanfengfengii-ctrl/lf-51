@@ -11,8 +11,7 @@
     <strong>提示：</strong>需要至少2个刻度方案才能进行对比。当前有 {{ schemes|length }} 个方案。
     <a href="/containers/{{ container.id }}/schemes/new" class="btn btn-sm btn-primary" style="margin-left: 15px;">新建方案</a>
 </div>
-{% endif %}
-
+{% else %}
 <div id="summaryCard" class="card">
     <h3>方案指标对比</h3>
     <div id="compareTableContainer"></div>
@@ -32,9 +31,11 @@
     <h3>平均误差 & 最大误差对比</h3>
     <div id="compareStatsPlot" class="plot-container" style="height: 350px;"></div>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
+{% if schemes|length >= 2 %}
 <script>
 const colorPalette = ['#3182ce', '#e53e3e', '#38a169', '#d69e2e', '#805ad5', '#dd6b20', '#319795'];
 
@@ -192,4 +193,5 @@ function renderStatsCompare(schemes) {
 
 loadCompareData();
 </script>
+{% endif %}
 {% endblock %}
