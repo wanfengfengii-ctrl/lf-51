@@ -396,3 +396,338 @@ def generate_error_comparison(candidates: List[Dict[str, Any]]) -> List[Dict[str
         })
     
     return comparison
+
+
+# ============================================
+# 多漏壶串联系统模拟与昼夜计时校正模块
+# ============================================
+
+SHICHEN_NAMES = [
+    "子时", "丑时", "寅时", "卯时", "辰时", "巳时",
+    "午时", "未时", "申时", "酉时", "戌时", "亥时"
+]
+
+SHICHEN_MODERN_HOURS = [
+    (23, 1), (1, 3), (3, 5), (5, 7), (7, 9), (9, 11),
+    (11, 13), (13, 15), (15, 17), (17, 19), (19, 21), (21, 23)
+]
+
+DYNASTY_FORMATS = {
+    "han": {"name": "汉代", "shichen_count": 12, "subdivisions": 100, "unit": "刻"},
+    "tang": {"name": "唐代", "shichen_count": 12, "subdivisions": 96, "unit": "刻"},
+    "song": {"name": "宋代", "shichen_count": 12, "subdivisions": 96, "unit": "刻"},
+    "ming": {"name": "明代", "shichen_count": 12, "subdivisions": 96, "unit": "刻"},
+    "qing": {"name": "清代", "shichen_count": 12, "subdivisions": 96, "unit": "刻"},
+    "modern": {"name": "现代（百刻制）", "shichen_count": 12, "subdivisions": 100, "unit": "刻"},
+}
+
+
+def get_viscosity_correction(temperature_c: float) -> float:
+    t = max(0.0, min(temperature_c, 100.0))
+    mu_20 = 1.002e-3
+    mu_t = 1.002e-3 * math.exp(-0.025 * (t - 20))
+    return mu_20 / mu_t
+
+
+def generate_diurnal_temperature_curve(
+    total_seconds: float,
+    base_temp: float = 20.0,
+    amplitude: float = 8.0,
+    phase_offset: float = 0.0,
+    points: int = 500
+) -> List[Tuple[float, float]]:
+    curve = []
+    day_seconds = 24.0 * 3600.0
+    for i in range(points + 1):
+        t = (total_seconds * i) / points
+        phase = 2 * math.pi * (t / day_seconds) + phase_offset
+        temp = base_temp + amplitude * math.sin(phase - math.pi / 2)
+        curve.append((round(t, 2), round(temp, 3)))
+    return curve
+
+
+def get_temperature_at_time(target_time: float, temp_curve: List[Tuple[float, float]]) -> float:
+    if not temp_curve:
+        return 20.0
+    if target_time <= temp_curve[0][0]:
+        return temp_curve[0][1]
+    if target_time >= temp_curve[-1][0]:
+        return temp_curve[-1][1]
+    for i in range(1, len(temp_curve)):
+        prev_t, prev_temp = temp_curve[i - 1]
+        curr_t, curr_temp = temp_curve[i]
+        if prev_t <= target_time <= curr_t:
+            if prev_t == curr_t:
+                return prev_temp
+            ratio = (target_time - prev_t) / (curr_t - prev_t)
+            return prev_temp + ratio * (curr_temp - prev_temp)
+    return temp_curve[-1][1]
+
+
+def simulate_series_system(
+    stages: List[Dict[str, Any]],
+    enable_temp_effect: bool = True,
+    base_temperature: float = 20.0,
+    temp_amplitude: float = 8.0,
+    time_step: float = 0.5,
+    max_time: float = 24.0 * 3600.0
+) -> Dict[str, Any]:
+    n = len(stages)
+    if n == 0:
+        return {"error": "至少需要一级漏壶"}
+
+    current_levels = []
+    for s in stages:
+        init_level = s.get("initial_level_override")
+        if init_level is None or init_level <= 0:
+            init_level = s.get("initial_water_level", s.get("capacity", 100) * 0.8)
+        init_level = min(init_level, s.get("capacity", 100))
+        current_levels.append(init_level)
+
+    stage_curves = [[] for _ in range(n)]
+    for i in range(n):
+        stage_curves[i].append((0.0, current_levels[i]))
+
+    total_duration = 24.0 * 3600.0
+    temp_curve = generate_diurnal_temperature_curve(total_duration, base_temperature, temp_amplitude)
+
+    current_time = 0.0
+    outflow_history = []
+
+    while current_time < total_duration and current_levels[-1] > 0.001:
+        current_temp = get_temperature_at_time(current_time, temp_curve) if enable_temp_effect else base_temperature
+        viscosity_factor = get_viscosity_correction(current_temp) if enable_temp_effect else 1.0
+
+        inflow_next = 0.0
+        for i in range(n):
+            stage = stages[i]
+            od = stage.get("orifice_diameter_override")
+            if od is None or od <= 0:
+                od = stage.get("orifice_diameter", 0.5)
+            shape = stage.get("shape", "cylindrical")
+            capacity = stage.get("capacity", 100)
+            shape_params = stage.get("shape_params")
+            dc = stage.get("discharge_coefficient", 0.6)
+
+            effective_level = current_levels[i]
+            if i > 0:
+                effective_level = max(0, current_levels[i])
+
+            outflow_rate = calculate_flow_rate(
+                effective_level, od, shape, capacity, shape_params, dc
+            ) * viscosity_factor
+
+            if i > 0:
+                current_levels[i] += inflow_next * time_step
+
+            drop_rate = 0.0
+            container_area = get_cross_sectional_area(shape, current_levels[i], capacity, shape_params)
+            if container_area > 0:
+                drop_rate = outflow_rate / container_area
+
+            actual_step = min(time_step, current_levels[i] / max(drop_rate, 1e-10) if drop_rate > 0 else time_step)
+            current_levels[i] -= drop_rate * actual_step
+            current_levels[i] = max(0.0, min(current_levels[i], capacity))
+
+            if stage.get("is_refill_enabled", False):
+                trigger = stage.get("refill_trigger_level", capacity * 0.2)
+                target = stage.get("refill_target_level", capacity * 0.9)
+                if current_levels[i] <= trigger:
+                    current_levels[i] = target
+
+            if i == n - 1:
+                outflow_history.append((current_time, outflow_rate))
+
+            inflow_next = outflow_rate
+
+        current_time += actual_step
+        for i in range(n):
+            stage_curves[i].append((round(current_time, 2), round(current_levels[i], 6)))
+
+    total_elapsed = current_time
+    return {
+        "stage_curves": stage_curves,
+        "temp_curve": temp_curve,
+        "total_duration": total_elapsed,
+        "final_levels": current_levels,
+        "outflow_history": outflow_history
+    }
+
+
+def generate_shichen_time_scheme(
+    last_stage_curve: List[Tuple[float, float]],
+    total_duration: float,
+    shichen_count: int = 12,
+    error_threshold: float = 30.0,
+    dynasty_format: str = "modern"
+) -> Dict[str, Any]:
+    fmt = DYNASTY_FORMATS.get(dynasty_format, DYNASTY_FORMATS["modern"])
+    effective_shichen = min(shichen_count, fmt["shichen_count"])
+
+    shichen_duration = total_duration / effective_shichen
+    marks = []
+    error_curve = []
+
+    for i in range(effective_shichen + 1):
+        theoretical_time = i * shichen_duration
+        water_level = find_water_level_for_time(theoretical_time, last_stage_curve)
+        if water_level is None:
+            water_level = 0.0
+        actual_time = find_time_for_water_level(water_level, last_stage_curve) or theoretical_time
+        error = actual_time - theoretical_time
+
+        marks.append({
+            "scale_index": i,
+            "shichen_name": SHICHEN_NAMES[i] if i < effective_shichen else "终点",
+            "shichen_hours": SHICHEN_MODERN_HOURS[i] if i < effective_shichen else (23, 23),
+            "theoretical_time": theoretical_time,
+            "estimated_time": actual_time,
+            "water_level": water_level,
+            "error": error,
+            "abs_error": abs(error),
+            "exceeds_threshold": abs(error) > error_threshold,
+            "subdivision_count": fmt["subdivisions"],
+            "subdivision_unit": fmt["unit"]
+        })
+        error_curve.append({"time": theoretical_time, "error": error})
+
+    errors = [m["abs_error"] for m in marks]
+    total_error = sum(errors)
+    avg_error = total_error / len(errors) if errors else 0.0
+    max_error = max(errors) if errors else 0.0
+
+    warnings = detect_warning_segments(marks, error_threshold)
+
+    recommendations = generate_correction_recommendations(marks, warnings, total_duration, effective_shichen)
+
+    return {
+        "marks": marks,
+        "error_curve": error_curve,
+        "total_error": round(total_error, 4),
+        "avg_error": round(avg_error, 4),
+        "max_error": round(max_error, 4),
+        "warning_segments": warnings,
+        "recommendations": recommendations,
+        "dynasty": fmt["name"],
+        "subdivision_unit": fmt["unit"],
+        "subdivisions_per_shichen": fmt["subdivisions"]
+    }
+
+
+def generate_correction_recommendations(
+    marks: List[Dict],
+    warnings: List[Dict],
+    total_duration: float,
+    shichen_count: int
+) -> List[Dict[str, Any]]:
+    recommendations = []
+    errors = [m["error"] for m in marks]
+    cumulative_error = errors[-1] if errors else 0
+
+    if abs(cumulative_error) > 60:
+        direction = "偏快" if cumulative_error < 0 else "偏慢"
+        recommendations.append({
+            "type": "critical",
+            "priority": 1,
+            "title": "累计计时误差过大",
+            "description": f"全周期累计误差 {abs(cumulative_error):.1f} 秒，系统整体{direction}。",
+            "action": "建议调整最末级出流孔径：偏快则减小孔径，偏慢则增大孔径，或调整初始水位。"
+        })
+    elif abs(cumulative_error) > 30:
+        direction = "偏快" if cumulative_error < 0 else "偏慢"
+        recommendations.append({
+            "type": "warning",
+            "priority": 2,
+            "title": "累计计时偏差明显",
+            "description": f"全周期累计误差 {abs(cumulative_error):.1f} 秒，系统{direction}。",
+            "action": "建议微调最末级出流孔径或提高补水目标水位。"
+        })
+
+    if warnings:
+        high_warns = [w for w in warnings if w.get("severity") == "high"]
+        if high_warns:
+            recommendations.append({
+                "type": "warning",
+                "priority": 2,
+                "title": f"存在 {len(high_warns)} 处高危误差段",
+                "description": f"以下时段误差超阈值两倍：{', '.join(str(w['scale_index']) for w in high_warns)}",
+                "action": "建议在对应时段前增加补水操作，或检查串联级间连接是否通畅。"
+            })
+
+    if len(marks) > 1:
+        err_trend = []
+        for i in range(1, len(marks)):
+            err_trend.append(marks[i]["error"] - marks[i - 1]["error"])
+        avg_trend = sum(err_trend) / len(err_trend) if err_trend else 0
+        if abs(avg_trend) > 1:
+            recommendations.append({
+                "type": "info",
+                "priority": 3,
+                "title": "误差呈单调性趋势",
+                "description": "误差随时间持续累积，可能是补水机制不足或水位衰减过快。",
+                "action": "建议启用中间级自动补水，或调整补水触发阈值。"
+            })
+
+    if not recommendations:
+        recommendations.append({
+            "type": "success",
+            "priority": 5,
+            "title": "系统计时精度良好",
+            "description": f"12时辰累计误差 {abs(cumulative_error):.1f} 秒，各时辰误差均在阈值内。",
+            "action": "可直接采用此刻度方案，建议每日校准一次最末级水位。"
+        })
+
+    recommendations.sort(key=lambda r: r["priority"])
+    return recommendations
+
+
+def generate_dynasty_export(
+    scheme: Dict[str, Any],
+    system: Dict[str, Any],
+    stages: List[Dict[str, Any]],
+    dynasty_format: str = "modern"
+) -> Dict[str, Any]:
+    fmt = DYNASTY_FORMATS.get(dynasty_format, DYNASTY_FORMATS["modern"])
+    marks = scheme["marks"]
+    subdivisions = fmt["subdivisions"]
+    unit = fmt["unit"]
+
+    detailed_marks = []
+    for m in marks:
+        sub_marks = []
+        if m["scale_index"] < len(marks) - 1:
+            next_m = marks[m["scale_index"] + 1]
+            for k in range(subdivisions):
+                ratio = k / subdivisions
+                sub_marks.append({
+                    "sub_index": k,
+                    "water_level": m["water_level"] + ratio * (next_m["water_level"] - m["water_level"]),
+                    "theoretical_time": m["theoretical_time"] + ratio * (next_m["theoretical_time"] - m["theoretical_time"])
+                })
+        detailed_marks.append({
+            "shichen": m["shichen_name"],
+            "modern_hours": m["shichen_hours"],
+            "water_level": m["water_level"],
+            "theoretical_time_sec": m["theoretical_time"],
+            "error_sec": m["error"],
+            "subdivisions": sub_marks,
+            "subdivision_unit": unit,
+            "subdivision_count": subdivisions
+        })
+
+    return {
+        "dynasty": fmt["name"],
+        "dynasty_key": dynasty_format,
+        "system_name": system.get("name", ""),
+        "total_stages": len(stages),
+        "shichen_count": fmt["shichen_count"],
+        "subdivision_unit": unit,
+        "subdivisions_per_shichen": subdivisions,
+        "total_duration_hours": scheme.get("total_duration", 0) / 3600.0,
+        "total_error_sec": scheme.get("total_error", 0),
+        "avg_error_sec": scheme.get("avg_error", 0),
+        "max_error_sec": scheme.get("max_error", 0),
+        "shichen_marks": detailed_marks,
+        "stages": stages,
+        "generated_at": None
+    }

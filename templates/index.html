@@ -1,7 +1,24 @@
 {% extends "base.html" %}
 {% block title %}首页 - 漏壶刻度研究系统{% endblock %}
 {% block content %}
-<div class="page-header">
+<div class="module-cards">
+    <a href="/" class="module-card module-card-active">
+        <div class="module-icon">🏺</div>
+        <div class="module-info">
+            <h3>单级漏壶</h3>
+            <p>基础漏壶模型管理、刻度方案生成、实验数据校准</p>
+        </div>
+    </a>
+    <a href="/series" class="module-card">
+        <div class="module-icon">⚗️</div>
+        <div class="module-info">
+            <h3>多级串联系统</h3>
+            <p>多漏壶串联结构模拟、昼夜温度校正、12时辰计时方案</p>
+        </div>
+    </a>
+</div>
+
+<div class="page-header" style="margin-top: 30px;">
     <h2>漏壶模型列表</h2>
     <a href="/containers/new" class="btn btn-primary">+ 创建新漏壶</a>
 </div>

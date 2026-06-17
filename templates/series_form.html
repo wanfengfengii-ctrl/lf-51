@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% block title %}{% if system %}编辑{% else %}创建{% endif %}串联系统 - 漏壶刻度研究系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>{% if system %}编辑{% else %}创建{% endif %}多漏壶串联系统</h2>
+    <a href="/series" class="btn btn-secondary">返回列表</a>
+</div>
+
+<div class="card">
+    <form method="post" action="{% if system %}/series/{{ system.id }}/update{% else %}/series{% endif %}" id="seriesForm">
+        <div class="form-row">
+            <div class="form-group">
+                <label>系统名称 *</label>
+                <input type="text" name="name" required maxlength="200"
+                       value="{% if form_data %}{{ form_data.name }}{% elif system %}{{ system.name }}{% endif %}"
+                       placeholder="例如：宋代多级漏壶">
+            </div>
+            <div class="form-group">
+                <label>参考朝代</label>
+                <select name="dynasty">
+                    <option value="">请选择朝代</option>
+                    <option value="han" {% if (form_data and form_data.dynasty == 'han') or (not form_data and system and system.dynasty == 'han') %}selected{% endif %}>汉代</option>
+                    <option value="tang" {% if (form_data and form_data.dynasty == 'tang') or (not form_data and system and system.dynasty == 'tang') %}selected{% endif %}>唐代</option>
+                    <option value="song" {% if (form_data and form_data.dynasty == 'song') or (not form_data and system and system.dynasty == 'song') %}selected{% endif %}>宋代</option>
+                    <option value="ming" {% if (form_data and form_data.dynasty == 'ming') or (not form_data and system and system.dynasty == 'ming') %}selected{% endif %}>明代</option>
+                    <option value="qing" {% if (form_data and form_data.dynasty == 'qing') or (not form_data and system and system.dynasty == 'qing') %}selected{% endif %}>清代</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="enable_temp_effect" value="on"
+                           {% if (form_data and form_data.enable_temp_effect) or (not form_data and system and system.enable_temp_effect) %}checked{% endif %}>
+                    启用昼夜温度对流速的影响
+                </label>
+                <p class="help-text">模拟白昼与夜晚温差导致的水粘滞系数变化</p>
+            </div>
+            <div class="form-group">
+                <label>基准温度 (℃)</label>
+                <input type="number" name="base_temperature" step="0.1"
+                       value="{% if form_data %}{{ form_data.base_temperature }}{% elif system %}{{ system.base_temperature }}{% else %}20.0{% endif %}">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>描述</label>
+            <textarea name="description" rows="2" placeholder="可选：描述串联系统的历史背景或结构特点">{% if form_data %}{{ form_data.description if form_data.description is not none else '' }}{% elif system %}{{ system.description if system.description is not none else '' }}{% endif %}</textarea>
+        </div>
+
+        <h3 style="margin-top: 30px; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0; color: #1a365d;">串联容器配置（从上游到下游）</h3>
+        <p class="help-text" style="margin-bottom: 15px;">依次添加每一级漏壶，可配置补水规则和参数微调。水从最上级逐级流到最末级，由最末级水位判定时辰。</p>
+
+        <div id="stagesContainer"></div>
+
+        <div style="margin: 15px 0;">
+            <button type="button" class="btn btn-secondary" onclick="addStage()">+ 添加一级漏壶</button>
+        </div>
+
+        <input type="hidden" name="stage_container_ids" id="stageContainerIds">
+        <input type="hidden" name="stage_names" id="stageNames">
+        <input type="hidden" name="stage_refill_enabled" id="stageRefillEnabled">
+        <input type="hidden" name="stage_refill_trigger" id="stageRefillTrigger">
+        <input type="hidden" name="stage_refill_target" id="stageRefillTarget">
+        <input type="hidden" name="stage_orifice_override" id="stageOrificeOverride">
+        <input type="hidden" name="stage_initial_override" id="stageInitialOverride">
+        <input type="hidden" name="stage_discharge_coeff" id="stageDischargeCoeff">
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">{% if system %}保存修改{% else %}创建串联系统{% endif %}</button>
+            <a href="/series" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+
+<script>
+    var availableContainers = {{ containers|tojson|safe }};
+    {% if system %}
+    var existingStages = {{ system.stages|sort(attribute='stage_order')|tojson|safe }};
+    {% else %}
+    var existingStages = [];
+    {% endif %}
+    {% if form_data %}
+    var formData = {{ form_data|tojson|safe }};
+    {% else %}
+    var formData = null;
+    {% endif %}
+
+    var stageCount = 0;
+
+    function containerOptions(selectedId) {
+        var opts = '<option value="">请选择漏壶</option>';
+        availableContainers.forEach(function(c) {
+            var shapeMap = { 'cylindrical': '圆柱形', 'conical': '圆锥形', 'inverted_conical': '倒圆锥形', 'spherical': '球形' };
+            var shapeText = shapeMap[c.shape] || c.shape;
+            var sel = (selectedId && c.id == selectedId) ? 'selected' : '';
+            opts += '<option value="' + c.id + '" ' + sel + '>' + c.id + '. ' + c.name + ' (' + shapeText + ', 容量:' + c.capacity + ')</option>';
+        });
+        return opts;
+    }
+
+    function addStage(data) {
+        var idx = stageCount;
+        stageCount++;
+        data = data || {};
+        var html = `
+        <div class="card" style="background: #f7fafc; margin-bottom: 15px;" id="stage_${idx}">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h4 style="margin:0; color:#2c5282;">第 ${idx + 1} 级漏壶</h4>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removeStage(${idx})">删除本级</button>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>选择漏壶容器 *</label>
+                    <select class="stage-container" data-idx="${idx}">
+                        ${containerOptions(data.container_id)}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>本级别名</label>
+                    <input type="text" class="stage-name" data-idx="${idx}"
+                           value="${data.stage_name || ''}" placeholder="例如：夜天池、平水壶">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" class="stage-refill" data-idx="${idx}"
+                               ${data.is_refill_enabled ? 'checked' : ''}>
+                        启用自动补水
+                    </label>
+                    <p class="help-text">当水位低于触发值时自动补充到目标水位</p>
+                </div>
+                <div class="form-group">
+                    <label>出流系数 (0~1)</label>
+                    <input type="number" step="0.01" min="0.1" max="1" class="stage-dc" data-idx="${idx}"
+                           value="${data.discharge_coefficient || 0.6}">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>补水触发水位</label>
+                    <input type="number" step="any" class="stage-trigger" data-idx="${idx}"
+                           value="${data.refill_trigger_level !== undefined && data.refill_trigger_level !== null ? data.refill_trigger_level : ''}"
+                           placeholder="低于此水位时触发补水">
+                </div>
+                <div class="form-group">
+                    <label>补水目标水位</label>
+                    <input type="number" step="any" class="stage-target" data-idx="${idx}"
+                           value="${data.refill_target_level !== undefined && data.refill_target_level !== null ? data.refill_target_level : ''}"
+                           placeholder="补水后达到的水位">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>出流孔径微调 (可选)</label>
+                    <input type="number" step="any" class="stage-orifice" data-idx="${idx}"
+                           value="${data.orifice_diameter_override !== undefined && data.orifice_diameter_override !== null ? data.orifice_diameter_override : ''}"
+                           placeholder="留空则使用容器默认值">
+                </div>
+                <div class="form-group">
+                    <label>初始水位微调 (可选)</label>
+                    <input type="number" step="any" class="stage-initial" data-idx="${idx}"
+                           value="${data.initial_level_override !== undefined && data.initial_level_override !== null ? data.initial_level_override : ''}"
+                           placeholder="留空则使用容器默认值">
+                </div>
+            </div>
+        </div>`;
+        document.getElementById('stagesContainer').insertAdjacentHTML('beforeend', html);
+    }
+
+    function removeStage(idx) {
+        var el = document.getElementById('stage_' + idx);
+        if (el) el.remove();
+    }
+
+    function collectForm() {
+        var ids = [], names = [], refill = [], triggers = [], targets = [], orifices = [], initials = [], dcs = [];
+        document.querySelectorAll('#stagesContainer > div').forEach(function(el) {
+            var idx = el.id.split('_')[1];
+            var c = el.querySelector('.stage-container[data-idx="' + idx + '"]');
+            var n = el.querySelector('.stage-name[data-idx="' + idx + '"]');
+            var r = el.querySelector('.stage-refill[data-idx="' + idx + '"]');
+            var tg = el.querySelector('.stage-trigger[data-idx="' + idx + '"]');
+            var tt = el.querySelector('.stage-target[data-idx="' + idx + '"]');
+            var o = el.querySelector('.stage-orifice[data-idx="' + idx + '"]');
+            var init = el.querySelector('.stage-initial[data-idx="' + idx + '"]');
+            var dc = el.querySelector('.stage-dc[data-idx="' + idx + '"]');
+            if (c && c.value) {
+                ids.push(c.value);
+                names.push(n ? n.value : '');
+                if (r && r.checked) refill.push(ids.length - 1);
+                triggers.push(tg ? tg.value : '');
+                targets.push(tt ? tt.value : '');
+                orifices.push(o ? o.value : '');
+                initials.push(init ? init.value : '');
+                dcs.push(dc ? dc.value : '');
+            }
+        });
+        document.getElementById('stageContainerIds').value = ids.join(',');
+        document.getElementById('stageNames').value = names.join('|');
+        document.getElementById('stageRefillEnabled').value = refill.join(',');
+        document.getElementById('stageRefillTrigger').value = triggers.join('|');
+        document.getElementById('stageRefillTarget').value = targets.join('|');
+        document.getElementById('stageOrificeOverride').value = orifices.join('|');
+        document.getElementById('stageInitialOverride').value = initials.join('|');
+        document.getElementById('stageDischargeCoeff').value = dcs.join('|');
+        return ids.length > 0;
+    }
+
+    document.getElementById('seriesForm').addEventListener('submit', function(e) {
+        if (!collectForm()) {
+            e.preventDefault();
+            alert('请至少添加一级漏壶');
+        }
+    });
+
+    window.addEventListener('DOMContentLoaded', function() {
+        if (existingStages && existingStages.length > 0) {
+            existingStages.forEach(function(s) { addStage(s); });
+        } else if (formData && formData.stage_container_ids) {
+            var ids = formData.stage_container_ids.split(',').filter(Boolean);
+            var names = (formData.stage_names || '').split('|');
+            var refillSet = new Set((formData.stage_refill_enabled || '').split(',').map(Number));
+            var triggers = (formData.stage_refill_trigger || '').split('|');
+            var targets = (formData.stage_refill_target || '').split('|');
+            var orifices = (formData.stage_orifice_override || '').split('|');
+            var initials = (formData.stage_initial_override || '').split('|');
+            var dcs = (formData.stage_discharge_coeff || '').split('|');
+            ids.forEach(function(cid, i) {
+                addStage({
+                    container_id: parseInt(cid),
+                    stage_name: names[i] || '',
+                    is_refill_enabled: refillSet.has(i),
+                    refill_trigger_level: triggers[i] || null,
+                    refill_target_level: targets[i] || null,
+                    orifice_diameter_override: orifices[i] || null,
+                    initial_level_override: initials[i] || null,
+                    discharge_coefficient: dcs[i] || 0.6
+                });
+            });
+        } else {
+            addStage();
+            addStage();
+            addStage();
+        }
+    });
+</script>
+{% endblock %}

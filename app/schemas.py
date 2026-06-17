@@ -218,3 +218,109 @@ class RecommendationResponse(BaseModel):
     parameter_versions: List[ParameterVersionResponse]
     review_records: List[ReviewRecordResponse]
     error_comparison: List[Dict[str, Any]]
+
+
+class SeriesStageBase(BaseModel):
+    container_id: int = Field(..., gt=0)
+    stage_order: int = Field(..., ge=0)
+    stage_name: Optional[str] = None
+    is_refill_enabled: bool = False
+    refill_trigger_level: Optional[float] = None
+    refill_target_level: Optional[float] = None
+    orifice_diameter_override: Optional[float] = None
+    initial_level_override: Optional[float] = None
+    discharge_coefficient: float = Field(0.6, gt=0, le=1)
+
+
+class SeriesStageCreate(SeriesStageBase):
+    pass
+
+
+class SeriesStageResponse(SeriesStageBase):
+    id: int
+    container_name: Optional[str] = None
+    container_shape: Optional[str] = None
+    container_capacity: Optional[float] = None
+    container_orifice_diameter: Optional[float] = None
+    container_initial_water_level: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SeriesSystemBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    dynasty: Optional[str] = None
+    description: Optional[str] = None
+    enable_temp_effect: bool = True
+    base_temperature: float = Field(20.0)
+
+
+class SeriesSystemCreate(SeriesSystemBase):
+    stages: List[SeriesStageCreate] = []
+
+
+class SeriesSystemUpdate(SeriesSystemBase):
+    stages: List[SeriesStageCreate] = []
+
+
+class SeriesSystemResponse(SeriesSystemBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    stages: List[SeriesStageResponse] = []
+    stage_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class SeriesTimeSchemeBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    shichen_count: int = Field(12, gt=0)
+    dynasty_format: Optional[str] = None
+    description: Optional[str] = None
+
+
+class SeriesTimeSchemeCreate(SeriesTimeSchemeBase):
+    error_threshold: float = Field(30.0, gt=0)
+
+
+class SeriesTimeSchemeResponse(SeriesTimeSchemeBase):
+    id: int
+    system_id: int
+    total_duration: float
+    total_error: float
+    avg_error: float
+    max_error: float
+    created_at: Optional[datetime] = None
+    dynasty: Optional[str] = None
+    subdivision_unit: Optional[str] = None
+    subdivisions_per_shichen: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SeriesSimulationResponse(BaseModel):
+    stage_curves: List[List[Dict[str, float]]]
+    temp_curve: List[Dict[str, float]]
+    total_duration: float
+    final_levels: List[float]
+    error_threshold: float
+    shichen_count: int
+    dynasty_format: str
+    marks: List[Dict[str, Any]]
+    error_curve: List[Dict[str, float]]
+    total_error: float
+    avg_error: float
+    max_error: float
+    warning_segments: List[Dict[str, Any]]
+    recommendations: List[Dict[str, Any]]
+
+
+class SeriesSimulationRequest(BaseModel):
+    error_threshold: float = Field(30.0, gt=0)
+    shichen_count: int = Field(12, gt=0, le=24)
+    dynasty_format: str = "modern"
+    temp_amplitude: float = 8.0

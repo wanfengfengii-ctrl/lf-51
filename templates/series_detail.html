@@ -1,0 +1,499 @@
+{% extends "base.html" %}
+{% block title %}{{ system.name }} - 多漏壶串联系统{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h2>{{ system.name }}</h2>
+        <p style="color: #718096; margin-top: 5px;">
+            {% if system.dynasty %}朝代：{{ {'han':'汉代','tang':'唐代','song':'宋代','ming':'明代','qing':'清代'}[system.dynasty] }}{% endif %}
+            {% if system.enable_temp_effect %} | 昼夜温度影响：启用 | 基准温度：{{ system.base_temperature }}℃{% endif %}
+        </p>
+    </div>
+    <div style="display: flex; gap: 10px;">
+        <a href="/series" class="btn btn-secondary">返回列表</a>
+        <a href="/series/{{ system.id }}/edit" class="btn btn-secondary">编辑系统</a>
+        <form method="post" action="/series/{{ system.id }}/delete" class="inline-form" onsubmit="return confirm('确定要删除此串联系统及所有计时方案吗？');">
+            <button type="submit" class="btn btn-danger">删除</button>
+        </form>
+    </div>
+</div>
+
+{% if system.description %}
+<div class="card">
+    <p style="color: #4a5568;">{{ system.description }}</p>
+</div>
+{% endif %}
+
+<div class="tabs">
+    <a href="#stages" class="tab active" onclick="switchTab('stages')">系统结构</a>
+    <a href="#simulate" class="tab" onclick="switchTab('simulate')">模拟计时</a>
+    {% if active_scheme %}
+    <a href="#results" class="tab" onclick="switchTab('results')">模拟结果</a>
+    {% endif %}
+    <a href="#schemes" class="tab" onclick="switchTab('schemes')">历史方案</a>
+</div>
+
+<div id="tab-stages" class="tab-content">
+    <div class="card">
+        <h3>串联结构（共 {{ system.stages|length }} 级）</h3>
+        <div class="info-grid">
+            {% for stage in system.stages|sort(attribute='stage_order') %}
+            <div class="info-item" style="border-left-color: #{{ '%02x%02x%02x' | format(49 + loop.index0 * 30, 130 + loop.index0 * 10, 206 - loop.index0 * 20) }};">
+                <div class="label">第 {{ loop.index }} 级：{{ stage.stage_name or stage.container.name }}</div>
+                <div class="value" style="font-size: 14px;">
+                    形状：{% if stage.container.shape == 'cylindrical' %}圆柱形
+                    {% elif stage.container.shape == 'conical' %}圆锥形
+                    {% elif stage.container.shape == 'inverted_conical' %}倒圆锥形
+                    {% elif stage.container.shape == 'spherical' %}球形
+                    {% else %}{{ stage.container.shape }}
+                    {% endif %}
+                </div>
+                <div style="font-size: 12px; color: #718096; margin-top: 4px;">
+                    容量：{{ stage.container.capacity }} | 孔径：{{ stage.orifice_diameter_override or stage.container.orifice_diameter }}
+                    {% if stage.is_refill_enabled %}<br><span class="badge badge-info">自动补水</span>{% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>各级详细配置</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>级别</th>
+                    <th>别名</th>
+                    <th>容器</th>
+                    <th>形状</th>
+                    <th>容量</th>
+                    <th>出流孔径</th>
+                    <th>初始水位</th>
+                    <th>出流系数</th>
+                    <th>补水</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stage in system.stages|sort(attribute='stage_order') %}
+                <tr>
+                    <td><strong>第 {{ loop.index }} 级</strong></td>
+                    <td>{{ stage.stage_name or '-' }}</td>
+                    <td>{{ stage.container.name }}</td>
+                    <td>
+                        {% if stage.container.shape == 'cylindrical' %}圆柱形
+                        {% elif stage.container.shape == 'conical' %}圆锥形
+                        {% elif stage.container.shape == 'inverted_conical' %}倒圆锥形
+                        {% elif stage.container.shape == 'spherical' %}球形
+                        {% else %}{{ stage.container.shape }}
+                        {% endif %}
+                    </td>
+                    <td>{{ stage.container.capacity }}</td>
+                    <td>{{ stage.orifice_diameter_override or stage.container.orifice_diameter }}</td>
+                    <td>{{ stage.initial_level_override or stage.container.initial_water_level }}</td>
+                    <td>{{ stage.discharge_coefficient }}</td>
+                    <td>
+                        {% if stage.is_refill_enabled %}
+                        <span class="badge badge-success">启用</span>
+                        <br><small>触发:{{ stage.refill_trigger_level }} 目标:{{ stage.refill_target_level }}</small>
+                        {% else %}
+                        <span class="badge badge-warning">禁用</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="tab-simulate" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>生成计时方案</h3>
+        <p class="help-text">配置模拟参数，生成基于多级漏壶的 12 时辰连续计时方案</p>
+        <form method="post" action="/series/{{ system.id }}/simulate">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>方案名称 *</label>
+                    <input type="text" name="name" required maxlength="200" placeholder="例如：宋代漏壶标准计时方案">
+                </div>
+                <div class="form-group">
+                    <label>时辰数</label>
+                    <select name="shichen_count">
+                        <option value="12" selected>12 时辰（全天）</option>
+                        <option value="6">6 时辰（半天）</option>
+                        <option value="24">24 小时制</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>朝代制式</label>
+                    <select name="dynasty_format">
+                        <option value="modern">现代（百刻制）</option>
+                        <option value="han">汉代（百刻制）</option>
+                        <option value="tang">唐代（96刻制）</option>
+                        <option value="song">宋代（96刻制）</option>
+                        <option value="ming">明代（96刻制）</option>
+                        <option value="qing">清代（96刻制）</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>误差阈值（秒）</label>
+                    <input type="number" name="error_threshold" step="0.1" value="30.0">
+                </div>
+            </div>
+            {% if system.enable_temp_effect %}
+            <div class="form-row">
+                <div class="form-group">
+                    <label>温度日变化幅度（℃）</label>
+                    <input type="number" name="temp_amplitude" step="0.1" value="8.0">
+                    <p class="help-text">昼夜温差大小，影响水的粘滞系数从而改变流速</p>
+                </div>
+            </div>
+            {% endif %}
+            <div class="form-group">
+                <label>方案描述</label>
+                <textarea name="description" rows="2" placeholder="可选：记录本次模拟的参数设置或备注"></textarea>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">开始模拟</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if active_scheme %}
+<div id="tab-results" class="tab-content" style="display: none;">
+    <div class="page-header" style="margin-bottom: 15px;">
+        <h3 style="color: #1a365d;">方案：{{ active_scheme.name }}</h3>
+        <div style="display: flex; gap: 10px;">
+            <select id="dynastySelect" onchange="switchDynasty()" style="padding: 8px; border-radius: 6px; border: 1px solid #cbd5e0;">
+                <option value="han">汉代制式</option>
+                <option value="tang">唐代制式</option>
+                <option value="song">宋代制式</option>
+                <option value="ming">明代制式</option>
+                <option value="qing">清代制式</option>
+                <option value="modern" selected>现代百刻制</option>
+            </select>
+            <a href="#" id="exportJsonBtn" class="btn btn-secondary btn-sm">导出 JSON</a>
+            <a href="#" id="exportCsvBtn" class="btn btn-secondary btn-sm">导出 CSV</a>
+        </div>
+    </div>
+
+    <div class="stat-cards">
+        <div class="stat-card">
+            <div class="stat-value">{{ (active_scheme.total_duration / 3600)|round(2) }}</div>
+            <div class="stat-label">总时长（小时）</div>
+        </div>
+        <div class="stat-card {% if active_scheme.avg_error > 30 %}warning{% elif active_scheme.avg_error > 10 %}warning{% else %}success{% endif %}">
+            <div class="stat-value">{{ active_scheme.avg_error|round(2) }}</div>
+            <div class="stat-label">平均误差（秒）</div>
+        </div>
+        <div class="stat-card {% if active_scheme.max_error > 60 %}danger{% elif active_scheme.max_error > 30 %}warning{% else %}success{% endif %}">
+            <div class="stat-value">{{ active_scheme.max_error|round(2) }}</div>
+            <div class="stat-label">最大误差（秒）</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ active_scheme.shichen_count }}</div>
+            <div class="stat-label">时辰数</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>各级水位联动曲线</h3>
+        <div id="stageCurvesPlot" class="plot-container"></div>
+    </div>
+
+    {% if system.enable_temp_effect %}
+    <div class="card">
+        <h3>昼夜温度变化曲线</h3>
+        <div id="tempCurvePlot" class="plot-container" style="height: 300px;"></div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h3>累计计时误差曲线</h3>
+        <div id="errorCurvePlot" class="plot-container" style="height: 350px;"></div>
+    </div>
+
+    <div class="card">
+        <h3>校正建议</h3>
+        {% if active_scheme.recommendations %}
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+            {% for rec in active_scheme.recommendations %}
+            <div class="alert {% if rec.type == 'critical' %}alert-warning{% elif rec.type == 'warning' %}alert-warning{% elif rec.type == 'success' %}alert-info{% else %}alert-info{% endif %}" style="margin-bottom: 0;">
+                <strong>
+                    {% if rec.type == 'critical' %}🔴 严重
+                    {% elif rec.type == 'warning' %}🟡 警告
+                    {% elif rec.type == 'success' %}🟢 良好
+                    {% else %}ℹ️ 建议
+                    {% endif %}
+                    {{ rec.title }}
+                </strong>
+                <p style="margin: 8px 0 4px 0;">{{ rec.description }}</p>
+                <p style="font-size: 13px; color: #4a5568;"><strong>建议措施：</strong>{{ rec.action }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h3>异常预警</h3>
+        {% if active_scheme.warning_segments and active_scheme.warning_segments|length > 0 %}
+        <table>
+            <thead>
+                <tr>
+                    <th>时辰位置</th>
+                    <th>严重程度</th>
+                    <th>误差（秒）</th>
+                    <th>阈值（秒）</th>
+                    <th>时段</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for w in active_scheme.warning_segments %}
+                <tr class="{% if w.severity == 'high' %}highlight-error{% else %}highlight-warning{% endif %}">
+                    <td>第 {{ w.scale_index }} 刻度</td>
+                    <td>
+                        {% if w.severity == 'high' %}
+                        <span class="badge badge-danger">高危</span>
+                        {% else %}
+                        <span class="badge badge-warning">中危</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ w.error|round(2) }}</td>
+                    <td>{{ w.threshold }}</td>
+                    <td>{{ w.start_time|round(0) }} ~ {{ w.end_time|round(0) }} 秒</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>✅ 无异常预警，所有时辰误差均在允许范围内</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h3>时辰刻度复原表</h3>
+        <p class="help-text">展示各时辰对应的水位、时间和误差信息</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>序号</th>
+                    <th>时辰</th>
+                    <th>现代时段</th>
+                    <th>理论时间（秒）</th>
+                    <th>实际时间（秒）</th>
+                    <th>水位</th>
+                    <th>误差（秒）</th>
+                    <th>状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in active_scheme.marks %}
+                <tr class="{% if m.exceeds_threshold %}highlight-error{% endif %}">
+                    <td>{{ m.scale_index }}</td>
+                    <td><strong>{{ m.shichen_name }}</strong></td>
+                    <td>
+                        {% if m.shichen_hours %}
+                        {{ '%02d:00'|format(m.shichen_hours[0]) }} - {{ '%02d:00'|format(m.shichen_hours[1]) }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>{{ m.theoretical_time|round(1) }}</td>
+                    <td>{{ m.estimated_time|round(1) }}</td>
+                    <td>{{ m.water_level|round(4) }}</td>
+                    <td>
+                        {% if m.error >= 0 %}+{% endif %}{{ m.error|round(2) }}
+                    </td>
+                    <td>
+                        {% if m.exceeds_threshold %}
+                        <span class="badge badge-danger">超阈值</span>
+                        {% else %}
+                        <span class="badge badge-success">正常</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div id="tab-schemes" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>历史计时方案</h3>
+        {% if time_schemes %}
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>方案名称</th>
+                    <th>时辰数</th>
+                    <th>朝代制式</th>
+                    <th>总时长(小时)</th>
+                    <th>平均误差(秒)</th>
+                    <th>最大误差(秒)</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in time_schemes %}
+                <tr>
+                    <td>{{ s.id }}</td>
+                    <td><strong>{{ s.name }}</strong></td>
+                    <td>{{ s.shichen_count }}</td>
+                    <td>
+                        {% if s.dynasty_format == 'han' %}汉代
+                        {% elif s.dynasty_format == 'tang' %}唐代
+                        {% elif s.dynasty_format == 'song' %}宋代
+                        {% elif s.dynasty_format == 'ming' %}明代
+                        {% elif s.dynasty_format == 'qing' %}清代
+                        {% else %}现代
+                        {% endif %}
+                    </td>
+                    <td>{{ (s.total_duration / 3600)|round(2) }}</td>
+                    <td>{{ s.avg_error|round(2) }}</td>
+                    <td>{{ s.max_error|round(2) }}</td>
+                    <td>{{ s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else '-' }}</td>
+                    <td>
+                        <div class="table-actions">
+                            <a href="/series/{{ system.id }}/schemes/{{ s.id }}" class="btn btn-sm btn-primary">查看</a>
+                            <a href="/series/schemes/{{ s.id }}/export" class="btn btn-sm btn-secondary">导出</a>
+                            <form method="post" action="/series/schemes/{{ s.id }}/delete" class="inline-form" onsubmit="return confirm('确定删除此方案？');">
+                                <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无计时方案，前往「模拟计时」标签页创建第一个</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchTab(name) {
+    document.querySelectorAll('.tab-content').forEach(function(el) { el.style.display = 'none'; });
+    document.querySelectorAll('.tab').forEach(function(el) { el.classList.remove('active'); });
+    document.getElementById('tab-' + name).style.display = 'block';
+    event.target.classList.add('active');
+}
+
+{% if active_scheme %}
+var schemeId = {{ active_scheme.id }};
+var systemId = {{ system.id }};
+
+function updateExportLinks() {
+    var dynasty = document.getElementById('dynastySelect').value;
+    document.getElementById('exportJsonBtn').href = '/series/schemes/' + schemeId + '/export?dynasty=' + dynasty;
+    document.getElementById('exportCsvBtn').href = '/series/schemes/' + schemeId + '/export/csv?dynasty=' + dynasty;
+}
+
+function switchDynasty() {
+    updateExportLinks();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateExportLinks();
+
+    fetch('/api/series/schemes/' + schemeId + '/data')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var stageColors = ['#3182ce', '#38a169', '#d69e2e', '#e53e3e', '#805ad5', '#dd6b20', '#319795', '#b83280'];
+
+            var stageTraces = [];
+            if (data.stage_curves && data.stage_curves.length > 0) {
+                data.stage_curves.forEach(function(curve, idx) {
+                    stageTraces.push({
+                        x: curve.map(function(p) { return p.time / 3600; }),
+                        y: curve.map(function(p) { return p.level; }),
+                        mode: 'lines',
+                        name: '第' + (idx + 1) + '级水位',
+                        line: { color: stageColors[idx % stageColors.length], width: 2 }
+                    });
+                });
+            }
+
+            Plotly.newPlot('stageCurvesPlot', stageTraces, {
+                title: '各级漏壶水位随时间变化',
+                xaxis: { title: '时间（小时）', gridcolor: '#e2e8f0' },
+                yaxis: { title: '水位', gridcolor: '#e2e8f0' },
+                margin: { t: 50, r: 30, l: 60, b: 50 },
+                legend: { orientation: 'h', y: -0.15 },
+                plot_bgcolor: 'white',
+                paper_bgcolor: 'white'
+            }, { responsive: true });
+
+            {% if system.enable_temp_effect %}
+            if (data.temp_curve && data.temp_curve.length > 0) {
+                var tempTrace = {
+                    x: data.temp_curve.map(function(p) { return p.time / 3600; }),
+                    y: data.temp_curve.map(function(p) { return p.temp; }),
+                    mode: 'lines',
+                    name: '温度',
+                    line: { color: '#e53e3e', width: 2 },
+                    fill: 'tozeroy',
+                    fillcolor: 'rgba(229, 62, 62, 0.1)'
+                };
+                Plotly.newPlot('tempCurvePlot', [tempTrace], {
+                    title: '昼夜温度变化',
+                    xaxis: { title: '时间（小时）', gridcolor: '#e2e8f0' },
+                    yaxis: { title: '温度 (℃)', gridcolor: '#e2e8f0' },
+                    margin: { t: 40, r: 30, l: 60, b: 40 },
+                    plot_bgcolor: 'white',
+                    paper_bgcolor: 'white'
+                }, { responsive: true });
+            }
+            {% endif %}
+
+            if (data.error_curve && data.error_curve.length > 0) {
+                var errorTrace = {
+                    x: data.error_curve.map(function(p) { return p.time / 3600; }),
+                    y: data.error_curve.map(function(p) { return p.error; }),
+                    mode: 'lines+markers',
+                    name: '累计误差',
+                    line: { color: '#d69e2e', width: 2 },
+                    marker: { size: 4 }
+                };
+                var thresholdTrace = {
+                    x: [0, data.error_curve[data.error_curve.length - 1].time / 3600],
+                    y: [data.error_threshold, data.error_threshold],
+                    mode: 'lines',
+                    name: '正阈值',
+                    line: { color: '#e53e3e', width: 1, dash: 'dash' }
+                };
+                var thresholdTraceNeg = {
+                    x: [0, data.error_curve[data.error_curve.length - 1].time / 3600],
+                    y: [-data.error_threshold, -data.error_threshold],
+                    mode: 'lines',
+                    name: '负阈值',
+                    line: { color: '#e53e3e', width: 1, dash: 'dash' }
+                };
+                Plotly.newPlot('errorCurvePlot', [errorTrace, thresholdTrace, thresholdTraceNeg], {
+                    title: '累计计时误差曲线',
+                    xaxis: { title: '时间（小时）', gridcolor: '#e2e8f0' },
+                    yaxis: { title: '误差（秒）', gridcolor: '#e2e8f0' },
+                    margin: { t: 40, r: 30, l: 60, b: 50 },
+                    legend: { orientation: 'h', y: -0.15 },
+                    plot_bgcolor: 'white',
+                    paper_bgcolor: 'white'
+                }, { responsive: true });
+            }
+        });
+});
+{% endif %}
+</script>
+{% endblock %}

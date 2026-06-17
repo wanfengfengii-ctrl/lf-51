@@ -161,3 +161,64 @@ class ReviewRecord(Base):
     reviewed_at = Column(DateTime(timezone=True), server_default=func.now())
 
     calibration = relationship("CalibrationRecord", back_populates="review_records")
+
+
+class SeriesSystem(Base):
+    __tablename__ = "series_systems"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    dynasty = Column(String(50), nullable=True)
+    description = Column(Text, nullable=True)
+    temperature_profile = Column(JSON, nullable=True)
+    enable_temp_effect = Column(Boolean, nullable=False, default=True)
+    base_temperature = Column(Float, nullable=False, default=20.0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    stages = relationship("SeriesStage", back_populates="system", cascade="all, delete-orphan", order_by="SeriesStage.stage_order")
+    time_schemes = relationship("SeriesTimeScheme", back_populates="system", cascade="all, delete-orphan")
+
+
+class SeriesStage(Base):
+    __tablename__ = "series_stages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    system_id = Column(Integer, ForeignKey("series_systems.id"), nullable=False)
+    container_id = Column(Integer, ForeignKey("containers.id"), nullable=False)
+    stage_order = Column(Integer, nullable=False)
+    stage_name = Column(String(100), nullable=True)
+    is_refill_enabled = Column(Boolean, nullable=False, default=False)
+    refill_trigger_level = Column(Float, nullable=True)
+    refill_target_level = Column(Float, nullable=True)
+    orifice_diameter_override = Column(Float, nullable=True)
+    initial_level_override = Column(Float, nullable=True)
+    discharge_coefficient = Column(Float, nullable=False, default=0.6)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    system = relationship("SeriesSystem", back_populates="stages")
+    container = relationship("Container")
+
+
+class SeriesTimeScheme(Base):
+    __tablename__ = "series_time_schemes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    system_id = Column(Integer, ForeignKey("series_systems.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    shichen_count = Column(Integer, nullable=False, default=12)
+    dynasty_format = Column(String(50), nullable=True)
+    total_duration = Column(Float, nullable=False)
+    total_error = Column(Float, nullable=False, default=0.0)
+    avg_error = Column(Float, nullable=False, default=0.0)
+    max_error = Column(Float, nullable=False, default=0.0)
+    marks = Column(JSON, nullable=False)
+    stage_curves = Column(JSON, nullable=True)
+    error_curve = Column(JSON, nullable=True)
+    warning_segments = Column(JSON, nullable=True)
+    recommendations = Column(JSON, nullable=True)
+    temp_curve = Column(JSON, nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    system = relationship("SeriesSystem", back_populates="time_schemes")

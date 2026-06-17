@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}多漏壶串联系统 - 漏壶刻度研究系统{% endblock %}
+{% block content %}
+<div class="module-cards">
+    <a href="/" class="module-card">
+        <div class="module-icon">🏺</div>
+        <div class="module-info">
+            <h3>单级漏壶</h3>
+            <p>基础漏壶模型管理、刻度方案生成、实验数据校准</p>
+        </div>
+    </a>
+    <a href="/series" class="module-card module-card-active">
+        <div class="module-icon">⚗️</div>
+        <div class="module-info">
+            <h3>多级串联系统</h3>
+            <p>多漏壶串联结构模拟、昼夜温度校正、12时辰计时方案</p>
+        </div>
+    </a>
+</div>
+
+<div class="page-header" style="margin-top: 30px;">
+    <h2>多漏壶串联系统列表</h2>
+    <a href="/series/new" class="btn btn-primary">+ 创建串联系统</a>
+</div>
+
+{% if systems %}
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>系统名称</th>
+                <th>朝代</th>
+                <th>级数</th>
+                <th>温度影响</th>
+                <th>基准温度</th>
+                <th>计时方案数</th>
+                <th>创建时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in systems %}
+            <tr>
+                <td>{{ s.id }}</td>
+                <td><strong>{{ s.name }}</strong></td>
+                <td>{{ s.dynasty or '-' }}</td>
+                <td>{{ s.stages|length }}</td>
+                <td>
+                    {% if s.enable_temp_effect %}
+                    <span class="badge badge-info">启用</span>
+                    {% else %}
+                    <span class="badge badge-warning">禁用</span>
+                    {% endif %}
+                </td>
+                <td>{{ s.base_temperature }} ℃</td>
+                <td>{{ s.time_schemes|length }}</td>
+                <td>{{ s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else '-' }}</td>
+                <td>
+                    <div class="table-actions">
+                        <a href="/series/{{ s.id }}" class="btn btn-sm btn-primary">查看</a>
+                        <a href="/series/{{ s.id }}/edit" class="btn btn-sm btn-secondary">编辑</a>
+                        <form method="post" action="/series/{{ s.id }}/delete" class="inline-form" onsubmit="return confirm('确定要删除此串联系统及所有计时方案吗？');">
+                            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <p>暂无串联系统，点击上方按钮创建第一个多级漏壶系统</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import json
 
 from .database import engine, get_db, Base
@@ -1024,3 +1024,548 @@ async def list_calibrations(request: Request, container_id: int, db: Session = D
     return templates.TemplateResponse("calibration_list.html", {
         "request": request, "container": container, "calibrations": calibrations
     })
+
+
+# ============================================
+# 多漏壶串联系统模拟与昼夜计时校正模块
+# ============================================
+
+def _stage_to_dict(stage: models.SeriesStage) -> Dict[str, Any]:
+    c = stage.container
+    return {
+        "id": stage.id,
+        "container_id": stage.container_id,
+        "container_name": c.name if c else "",
+        "container_shape": c.shape if c else "cylindrical",
+        "container_capacity": c.capacity if c else 100,
+        "container_orifice_diameter": c.orifice_diameter if c else 0.5,
+        "container_initial_water_level": c.initial_water_level if c else 80,
+        "shape": c.shape if c else "cylindrical",
+        "capacity": c.capacity if c else 100,
+        "orifice_diameter": c.orifice_diameter if c else 0.5,
+        "initial_water_level": c.initial_water_level if c else 80,
+        "shape_params": c.shape_params if c else None,
+        "stage_order": stage.stage_order,
+        "stage_name": stage.stage_name,
+        "is_refill_enabled": stage.is_refill_enabled,
+        "refill_trigger_level": stage.refill_trigger_level,
+        "refill_target_level": stage.refill_target_level,
+        "orifice_diameter_override": stage.orifice_diameter_override,
+        "initial_level_override": stage.initial_level_override,
+        "discharge_coefficient": stage.discharge_coefficient
+    }
+
+
+@app.get("/series", response_class=HTMLResponse)
+async def list_series_systems(request: Request, db: Session = Depends(get_db)):
+    systems = db.query(models.SeriesSystem).order_by(models.SeriesSystem.created_at.desc()).all()
+    return templates.TemplateResponse("series_list.html", {
+        "request": request, "systems": systems
+    })
+
+
+@app.get("/series/new", response_class=HTMLResponse)
+async def new_series_form(request: Request, db: Session = Depends(get_db)):
+    containers = db.query(models.Container).order_by(models.Container.created_at.desc()).all()
+    return templates.TemplateResponse("series_form.html", {
+        "request": request, "system": None, "containers": containers
+    })
+
+
+@app.post("/series", response_class=HTMLResponse)
+async def create_series_system(
+    request: Request,
+    name: str = Form(...),
+    dynasty: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    enable_temp_effect: bool = Form(False),
+    base_temperature: float = Form(20.0),
+    stage_container_ids: str = Form(...),
+    stage_names: Optional[str] = Form(None),
+    stage_refill_enabled: Optional[str] = Form(None),
+    stage_refill_trigger: Optional[str] = Form(None),
+    stage_refill_target: Optional[str] = Form(None),
+    stage_orifice_override: Optional[str] = Form(None),
+    stage_initial_override: Optional[str] = Form(None),
+    stage_discharge_coeff: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    errors = []
+    if not name:
+        errors.append("系统名称不能为空")
+
+    try:
+        container_ids = [int(x.strip()) for x in stage_container_ids.split(",") if x.strip()]
+    except ValueError:
+        errors.append("串联容器ID列表格式错误")
+        container_ids = []
+
+    if len(container_ids) < 1:
+        errors.append("至少需要一级漏壶")
+
+    for cid in container_ids:
+        c = db.query(models.Container).filter(models.Container.id == cid).first()
+        if not c:
+            errors.append(f"容器 ID={cid} 不存在")
+
+    if errors:
+        containers = db.query(models.Container).order_by(models.Container.created_at.desc()).all()
+        return templates.TemplateResponse("series_form.html", {
+            "request": request, "system": None, "containers": containers,
+            "errors": errors, "form_data": {
+                "name": name, "dynasty": dynasty or "",
+                "description": description or "",
+                "enable_temp_effect": enable_temp_effect,
+                "base_temperature": base_temperature,
+                "stage_container_ids": stage_container_ids,
+                "stage_names": stage_names or "",
+                "stage_refill_enabled": stage_refill_enabled or "",
+                "stage_refill_trigger": stage_refill_trigger or "",
+                "stage_refill_target": stage_refill_target or "",
+                "stage_orifice_override": stage_orifice_override or "",
+                "stage_initial_override": stage_initial_override or "",
+                "stage_discharge_coeff": stage_discharge_coeff or ""
+            }
+        })
+
+    refill_set = set()
+    if stage_refill_enabled:
+        for x in stage_refill_enabled.split(","):
+            x = x.strip()
+            if x:
+                try:
+                    refill_set.add(int(x))
+                except ValueError:
+                    pass
+
+    name_list = [x.strip() for x in (stage_names or "").split("|")] if stage_names else []
+    trigger_list = [x.strip() for x in (stage_refill_trigger or "").split("|")] if stage_refill_trigger else []
+    target_list = [x.strip() for x in (stage_refill_target or "").split("|")] if stage_refill_target else []
+    orifice_list = [x.strip() for x in (stage_orifice_override or "").split("|")] if stage_orifice_override else []
+    init_list = [x.strip() for x in (stage_initial_override or "").split("|")] if stage_initial_override else []
+    dc_list = [x.strip() for x in (stage_discharge_coeff or "").split("|")] if stage_discharge_coeff else []
+
+    db_system = models.SeriesSystem(
+        name=name, dynasty=dynasty, description=description,
+        enable_temp_effect=enable_temp_effect, base_temperature=base_temperature
+    )
+    db.add(db_system)
+    db.flush()
+
+    for idx, cid in enumerate(container_ids):
+        def _get(lst, i, default=None):
+            return lst[i].strip() if i < len(lst) and lst[i].strip() else default
+
+        trigger_v = _get(trigger_list, idx)
+        target_v = _get(target_list, idx)
+        orifice_v = _get(orifice_list, idx)
+        init_v = _get(init_list, idx)
+        dc_v = _get(dc_list, idx)
+
+        db_stage = models.SeriesStage(
+            system_id=db_system.id,
+            container_id=cid,
+            stage_order=idx,
+            stage_name=_get(name_list, idx),
+            is_refill_enabled=idx in refill_set,
+            refill_trigger_level=float(trigger_v) if trigger_v else None,
+            refill_target_level=float(target_v) if target_v else None,
+            orifice_diameter_override=float(orifice_v) if orifice_v else None,
+            initial_level_override=float(init_v) if init_v else None,
+            discharge_coefficient=float(dc_v) if dc_v else 0.6
+        )
+        db.add(db_stage)
+
+    db.commit()
+    db.refresh(db_system)
+    return RedirectResponse(f"/series/{db_system.id}", status_code=303)
+
+
+@app.get("/series/{system_id}", response_class=HTMLResponse)
+async def view_series_system(request: Request, system_id: int, db: Session = Depends(get_db)):
+    system = db.query(models.SeriesSystem).filter(models.SeriesSystem.id == system_id).first()
+    if not system:
+        raise HTTPException(status_code=404, detail="串联系统不存在")
+    time_schemes = db.query(models.SeriesTimeScheme).filter(
+        models.SeriesTimeScheme.system_id == system_id
+    ).order_by(models.SeriesTimeScheme.created_at.desc()).all()
+    return templates.TemplateResponse("series_detail.html", {
+        "request": request, "system": system, "time_schemes": time_schemes
+    })
+
+
+@app.get("/series/{system_id}/edit", response_class=HTMLResponse)
+async def edit_series_form(request: Request, system_id: int, db: Session = Depends(get_db)):
+    system = db.query(models.SeriesSystem).filter(models.SeriesSystem.id == system_id).first()
+    if not system:
+        raise HTTPException(status_code=404, detail="串联系统不存在")
+    containers = db.query(models.Container).order_by(models.Container.created_at.desc()).all()
+    return templates.TemplateResponse("series_form.html", {
+        "request": request, "system": system, "containers": containers
+    })
+
+
+@app.post("/series/{system_id}/update", response_class=HTMLResponse)
+async def update_series_system(
+    request: Request,
+    system_id: int,
+    name: str = Form(...),
+    dynasty: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    enable_temp_effect: bool = Form(False),
+    base_temperature: float = Form(20.0),
+    stage_container_ids: str = Form(...),
+    stage_names: Optional[str] = Form(None),
+    stage_refill_enabled: Optional[str] = Form(None),
+    stage_refill_trigger: Optional[str] = Form(None),
+    stage_refill_target: Optional[str] = Form(None),
+    stage_orifice_override: Optional[str] = Form(None),
+    stage_initial_override: Optional[str] = Form(None),
+    stage_discharge_coeff: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    system = db.query(models.SeriesSystem).filter(models.SeriesSystem.id == system_id).first()
+    if not system:
+        raise HTTPException(status_code=404, detail="串联系统不存在")
+
+    errors = []
+    try:
+        container_ids = [int(x.strip()) for x in stage_container_ids.split(",") if x.strip()]
+    except ValueError:
+        errors.append("串联容器ID列表格式错误")
+        container_ids = []
+
+    if len(container_ids) < 1:
+        errors.append("至少需要一级漏壶")
+
+    for cid in container_ids:
+        c = db.query(models.Container).filter(models.Container.id == cid).first()
+        if not c:
+            errors.append(f"容器 ID={cid} 不存在")
+
+    if errors:
+        containers = db.query(models.Container).order_by(models.Container.created_at.desc()).all()
+        return templates.TemplateResponse("series_form.html", {
+            "request": request, "system": system, "containers": containers,
+            "errors": errors, "form_data": {
+                "name": name, "dynasty": dynasty or "",
+                "description": description or "",
+                "enable_temp_effect": enable_temp_effect,
+                "base_temperature": base_temperature,
+                "stage_container_ids": stage_container_ids,
+                "stage_names": stage_names or "",
+                "stage_refill_enabled": stage_refill_enabled or "",
+                "stage_refill_trigger": stage_refill_trigger or "",
+                "stage_refill_target": stage_refill_target or "",
+                "stage_orifice_override": stage_orifice_override or "",
+                "stage_initial_override": stage_initial_override or "",
+                "stage_discharge_coeff": stage_discharge_coeff or ""
+            }
+        })
+
+    refill_set = set()
+    if stage_refill_enabled:
+        for x in stage_refill_enabled.split(","):
+            x = x.strip()
+            if x:
+                try:
+                    refill_set.add(int(x))
+                except ValueError:
+                    pass
+
+    name_list = [x.strip() for x in (stage_names or "").split("|")] if stage_names else []
+    trigger_list = [x.strip() for x in (stage_refill_trigger or "").split("|")] if stage_refill_trigger else []
+    target_list = [x.strip() for x in (stage_refill_target or "").split("|")] if stage_refill_target else []
+    orifice_list = [x.strip() for x in (stage_orifice_override or "").split("|")] if stage_orifice_override else []
+    init_list = [x.strip() for x in (stage_initial_override or "").split("|")] if stage_initial_override else []
+    dc_list = [x.strip() for x in (stage_discharge_coeff or "").split("|")] if stage_discharge_coeff else []
+
+    system.name = name
+    system.dynasty = dynasty
+    system.description = description
+    system.enable_temp_effect = enable_temp_effect
+    system.base_temperature = base_temperature
+
+    for old in system.stages:
+        db.delete(old)
+    db.flush()
+
+    for idx, cid in enumerate(container_ids):
+        def _get(lst, i, default=None):
+            return lst[i].strip() if i < len(lst) and lst[i].strip() else default
+
+        trigger_v = _get(trigger_list, idx)
+        target_v = _get(target_list, idx)
+        orifice_v = _get(orifice_list, idx)
+        init_v = _get(init_list, idx)
+        dc_v = _get(dc_list, idx)
+
+        db_stage = models.SeriesStage(
+            system_id=system.id,
+            container_id=cid,
+            stage_order=idx,
+            stage_name=_get(name_list, idx),
+            is_refill_enabled=idx in refill_set,
+            refill_trigger_level=float(trigger_v) if trigger_v else None,
+            refill_target_level=float(target_v) if target_v else None,
+            orifice_diameter_override=float(orifice_v) if orifice_v else None,
+            initial_level_override=float(init_v) if init_v else None,
+            discharge_coefficient=float(dc_v) if dc_v else 0.6
+        )
+        db.add(db_stage)
+
+    db.commit()
+    return RedirectResponse(f"/series/{system.id}", status_code=303)
+
+
+@app.post("/series/{system_id}/delete", response_class=HTMLResponse)
+async def delete_series_system(system_id: int, db: Session = Depends(get_db)):
+    system = db.query(models.SeriesSystem).filter(models.SeriesSystem.id == system_id).first()
+    if not system:
+        raise HTTPException(status_code=404, detail="串联系统不存在")
+    db.delete(system)
+    db.commit()
+    return RedirectResponse("/series", status_code=303)
+
+
+@app.post("/series/{system_id}/simulate", response_class=HTMLResponse)
+async def run_series_simulation(
+    system_id: int,
+    name: str = Form(...),
+    shichen_count: int = Form(12),
+    dynasty_format: str = Form("modern"),
+    error_threshold: float = Form(30.0),
+    temp_amplitude: float = Form(8.0),
+    description: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    system = db.query(models.SeriesSystem).filter(models.SeriesSystem.id == system_id).first()
+    if not system:
+        raise HTTPException(status_code=404, detail="串联系统不存在")
+
+    errors = []
+    if shichen_count < 1 or shichen_count > 24:
+        errors.append("时辰数必须在1-24之间")
+    if error_threshold <= 0:
+        errors.append("误差阈值必须大于0")
+    if not name:
+        errors.append("方案名称不能为空")
+
+    if errors:
+        time_schemes = db.query(models.SeriesTimeScheme).filter(
+            models.SeriesTimeScheme.system_id == system_id
+        ).order_by(models.SeriesTimeScheme.created_at.desc()).all()
+        return templates.TemplateResponse("series_detail.html", {
+            "request": None, "system": system, "time_schemes": time_schemes,
+            "errors": errors
+        })
+
+    stages = [_stage_to_dict(s) for s in sorted(system.stages, key=lambda x: x.stage_order)]
+    sim = physics.simulate_series_system(
+        stages,
+        enable_temp_effect=system.enable_temp_effect,
+        base_temperature=system.base_temperature,
+        temp_amplitude=temp_amplitude
+    )
+
+    last_curve = sim["stage_curves"][-1] if sim["stage_curves"] else []
+    scheme_result = physics.generate_shichen_time_scheme(
+        last_curve, sim["total_duration"], shichen_count, error_threshold, dynasty_format
+    )
+
+    stage_curves_json = []
+    for sc in sim["stage_curves"]:
+        stage_curves_json.append([{"time": t, "level": l} for t, l in sc])
+
+    temp_curve_json = [{"time": t, "temp": tmp} for t, tmp in sim.get("temp_curve", [])]
+
+    db_scheme = models.SeriesTimeScheme(
+        system_id=system.id,
+        name=name,
+        shichen_count=shichen_count,
+        dynasty_format=dynasty_format,
+        total_duration=sim["total_duration"],
+        total_error=scheme_result["total_error"],
+        avg_error=scheme_result["avg_error"],
+        max_error=scheme_result["max_error"],
+        marks=scheme_result["marks"],
+        stage_curves=stage_curves_json,
+        error_curve=scheme_result["error_curve"],
+        warning_segments=scheme_result["warning_segments"],
+        recommendations=scheme_result["recommendations"],
+        temp_curve=temp_curve_json,
+        description=description
+    )
+    db.add(db_scheme)
+    db.commit()
+    return RedirectResponse(f"/series/{system_id}/schemes/{db_scheme.id}", status_code=303)
+
+
+@app.get("/series/{system_id}/schemes/{scheme_id}", response_class=HTMLResponse)
+async def view_series_scheme(
+    request: Request, system_id: int, scheme_id: int, db: Session = Depends(get_db)
+):
+    system = db.query(models.SeriesSystem).filter(models.SeriesSystem.id == system_id).first()
+    scheme = db.query(models.SeriesTimeScheme).filter(models.SeriesTimeScheme.id == scheme_id).first()
+    if not system or not scheme:
+        raise HTTPException(status_code=404, detail="资源不存在")
+    stages = [_stage_to_dict(s) for s in sorted(system.stages, key=lambda x: x.stage_order)]
+    return templates.TemplateResponse("series_detail.html", {
+        "request": request, "system": system,
+        "time_schemes": db.query(models.SeriesTimeScheme).filter(
+            models.SeriesTimeScheme.system_id == system_id
+        ).order_by(models.SeriesTimeScheme.created_at.desc()).all(),
+        "active_scheme": scheme, "stages": stages
+    })
+
+
+@app.post("/series/schemes/{scheme_id}/delete", response_class=HTMLResponse)
+async def delete_series_scheme(scheme_id: int, db: Session = Depends(get_db)):
+    scheme = db.query(models.SeriesTimeScheme).filter(models.SeriesTimeScheme.id == scheme_id).first()
+    if not scheme:
+        raise HTTPException(status_code=404, detail="计时方案不存在")
+    system_id = scheme.system_id
+    db.delete(scheme)
+    db.commit()
+    return RedirectResponse(f"/series/{system_id}", status_code=303)
+
+
+@app.get("/api/series/{system_id}/simulate")
+async def api_series_simulate(
+    system_id: int,
+    error_threshold: float = 30.0,
+    shichen_count: int = 12,
+    dynasty_format: str = "modern",
+    temp_amplitude: float = 8.0,
+    db: Session = Depends(get_db)
+):
+    system = db.query(models.SeriesSystem).filter(models.SeriesSystem.id == system_id).first()
+    if not system:
+        raise HTTPException(status_code=404, detail="串联系统不存在")
+
+    stages = [_stage_to_dict(s) for s in sorted(system.stages, key=lambda x: x.stage_order)]
+    sim = physics.simulate_series_system(
+        stages, enable_temp_effect=system.enable_temp_effect,
+        base_temperature=system.base_temperature, temp_amplitude=temp_amplitude
+    )
+
+    last_curve = sim["stage_curves"][-1] if sim["stage_curves"] else []
+    scheme = physics.generate_shichen_time_scheme(
+        last_curve, sim["total_duration"], shichen_count, error_threshold, dynasty_format
+    )
+
+    stage_curves_out = []
+    for sc in sim["stage_curves"]:
+        stage_curves_out.append([{"time": t, "level": l} for t, l in sc])
+
+    temp_curve_out = [{"time": t, "temp": tmp} for t, tmp in sim.get("temp_curve", [])]
+
+    return {
+        "stage_curves": stage_curves_out,
+        "temp_curve": temp_curve_out,
+        "total_duration": sim["total_duration"],
+        "final_levels": sim["final_levels"],
+        "error_threshold": error_threshold,
+        "shichen_count": shichen_count,
+        "dynasty_format": dynasty_format,
+        "marks": scheme["marks"],
+        "error_curve": scheme["error_curve"],
+        "total_error": scheme["total_error"],
+        "avg_error": scheme["avg_error"],
+        "max_error": scheme["max_error"],
+        "warning_segments": scheme["warning_segments"],
+        "recommendations": scheme["recommendations"]
+    }
+
+
+@app.get("/api/series/schemes/{scheme_id}/data")
+async def api_series_scheme_data(scheme_id: int, db: Session = Depends(get_db)):
+    scheme = db.query(models.SeriesTimeScheme).filter(models.SeriesTimeScheme.id == scheme_id).first()
+    if not scheme:
+        raise HTTPException(status_code=404, detail="计时方案不存在")
+    return {
+        "id": scheme.id,
+        "name": scheme.name,
+        "shichen_count": scheme.shichen_count,
+        "dynasty_format": scheme.dynasty_format,
+        "total_duration": scheme.total_duration,
+        "total_error": scheme.total_error,
+        "avg_error": scheme.avg_error,
+        "max_error": scheme.max_error,
+        "marks": scheme.marks,
+        "stage_curves": scheme.stage_curves or [],
+        "error_curve": scheme.error_curve or [],
+        "warning_segments": scheme.warning_segments or [],
+        "recommendations": scheme.recommendations or [],
+        "temp_curve": scheme.temp_curve or []
+    }
+
+
+@app.get("/series/schemes/{scheme_id}/export")
+async def export_series_scheme_json(
+    scheme_id: int, dynasty: str = "modern", db: Session = Depends(get_db)
+):
+    scheme = db.query(models.SeriesTimeScheme).filter(models.SeriesTimeScheme.id == scheme_id).first()
+    if not scheme:
+        raise HTTPException(status_code=404, detail="计时方案不存在")
+    system = scheme.system
+    stages = [_stage_to_dict(s) for s in sorted(system.stages, key=lambda x: x.stage_order)]
+    export_data = physics.generate_dynasty_export(
+        {
+            "marks": scheme.marks,
+            "total_duration": scheme.total_duration,
+            "total_error": scheme.total_error,
+            "avg_error": scheme.avg_error,
+            "max_error": scheme.max_error
+        },
+        {"name": system.name, "dynasty": system.dynasty},
+        stages,
+        dynasty
+    )
+    export_data["generated_at"] = scheme.created_at.isoformat() if scheme.created_at else None
+    return JSONResponse(
+        content=export_data,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f"attachment; filename=series_{scheme_id}_{dynasty}_scale.json"
+        }
+    )
+
+
+@app.get("/series/schemes/{scheme_id}/export/csv")
+async def export_series_scheme_csv(
+    scheme_id: int, dynasty: str = "modern", db: Session = Depends(get_db)
+):
+    scheme = db.query(models.SeriesTimeScheme).filter(models.SeriesTimeScheme.id == scheme_id).first()
+    if not scheme:
+        raise HTTPException(status_code=404, detail="计时方案不存在")
+
+    fmt = physics.DYNASTY_FORMATS.get(dynasty, physics.DYNASTY_FORMATS["modern"])
+    csv_lines = [
+        f"朝代制式,{fmt['name']}",
+        f"方案名称,{scheme.name}",
+        f"总时长(小时),{scheme.total_duration / 3600:.3f}",
+        f"累计误差(秒),{scheme.total_error:.3f}",
+        f"平均误差(秒),{scheme.avg_error:.3f}",
+        f"最大误差(秒),{scheme.max_error:.3f}",
+        "",
+        "时辰序号,时辰名称,对应现代时段,理论时间(秒),估计时间(秒),水位,误差(秒),是否超阈值,每时辰刻度数,刻度单位"
+    ]
+    for m in scheme.marks:
+        hrs = m.get("shichen_hours", (0, 0))
+        hr_str = f"{hrs[0]:02d}:00-{hrs[1]:02d}:00" if isinstance(hrs, (list, tuple)) else ""
+        csv_lines.append(
+            f"{m['scale_index']},{m.get('shichen_name','')},{hr_str},"
+            f"{m['theoretical_time']:.2f},{m['estimated_time']:.2f},"
+            f"{m['water_level']:.4f},{m['error']:.3f},"
+            f"{'是' if m.get('exceeds_threshold') else '否'},"
+            f"{m.get('subdivision_count', fmt['subdivisions'])},{m.get('subdivision_unit', fmt['unit'])}"
+        )
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(
+        content="\n".join(csv_lines),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename=series_{scheme_id}_{dynasty}_scale.csv"
+        }
+    )
