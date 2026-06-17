@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}多源校准记录 - {{ container.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>多源实验对比校准记录</h2>
+    <div>
+        <a href="/containers/{{ container.id }}" class="btn btn-secondary">返回容器详情</a>
+        <a href="/containers/{{ container.id }}/multi_calibrations/new" class="btn btn-primary">新建多源校准</a>
+    </div>
+</div>
+
+{% if calibrations %}
+<div class="card">
+    <h3>校准记录列表</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>校准方法</th>
+                <th>实验数量</th>
+                <th>状态</th>
+                <th>是否锁定</th>
+                <th>创建时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cal in calibrations %}
+            <tr>
+                <td>{{ cal.id }}</td>
+                <td>{{ cal.name }}</td>
+                <td>
+                    {% if cal.calibration_method == 'weighted_average' %}加权平均
+                    {% elif cal.calibration_method == 'mean' %}算术平均
+                    {% elif cal.calibration_method == 'median' %}中位数
+                    {% elif cal.calibration_method == 'robust_mean' %}稳健均值
+                    {% else %}{{ cal.calibration_method }}
+                    {% endif %}
+                </td>
+                <td>{{ cal.experiment_assocs|length }}</td>
+                <td>
+                    {% if cal.status == 'finalized' %}
+                    <span class="badge badge-success">已定稿</span>
+                    {% elif cal.status == 'candidates_generated' %}
+                    <span class="badge badge-info">候选方案已生成</span>
+                    {% elif cal.status == 'pending' %}
+                    <span class="badge badge-warning">待处理</span>
+                    {% else %}
+                    <span class="badge badge-info">{{ cal.status }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if cal.is_locked %}
+                    <span class="badge badge-success">已锁定</span>
+                    {% else %}
+                    <span class="badge badge-secondary">未锁定</span>
+                    {% endif %}
+                </td>
+                <td>{{ cal.created_at.strftime('%Y-%m-%d %H:%M') if cal.created_at else '-' }}</td>
+                <td>
+                    <div class="table-actions">
+                        <a href="/containers/{{ container.id }}/multi_calibrations/{{ cal.id }}"
+                           class="btn btn-sm btn-primary">查看详情</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card empty-state">
+    <p>暂无多源校准记录</p>
+    <a href="/containers/{{ container.id }}/multi_calibrations/new" class="btn btn-primary">创建第一个多源校准</a>
+</div>
+{% endif %}
+{% endblock %}

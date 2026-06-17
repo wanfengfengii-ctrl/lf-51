@@ -324,3 +324,234 @@ class SeriesSimulationRequest(BaseModel):
     shichen_count: int = Field(12, gt=0, le=24)
     dynasty_format: str = "modern"
     temp_amplitude: float = 8.0
+
+
+class ExperimentConditionBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    condition_type: str = Field(..., min_length=1, max_length=50)
+    temperature: Optional[float] = None
+    humidity: Optional[float] = None
+    pressure: Optional[float] = None
+    water_quality: Optional[str] = None
+    measurement_method: Optional[str] = None
+    instrument_accuracy: Optional[float] = None
+    operator: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ExperimentConditionCreate(ExperimentConditionBase):
+    pass
+
+
+class ExperimentConditionResponse(ExperimentConditionBase):
+    id: int
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MultiSourceExperimentAssocBase(BaseModel):
+    experiment_id: int = Field(..., gt=0)
+    weight: float = Field(1.0, gt=0)
+    is_included: bool = True
+
+
+class MultiSourceCalibrationBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    container_id: int = Field(..., gt=0)
+    system_id: Optional[int] = None
+    calibration_method: str = Field("weighted_average", pattern="^(weighted_average|mean|median|robust_mean)$")
+    notes: Optional[str] = None
+
+
+class MultiSourceCalibrationCreate(MultiSourceCalibrationBase):
+    experiments: List[MultiSourceExperimentAssocBase] = []
+    candidate_count: int = Field(5, gt=0, le=20)
+    min_scale_count: int = Field(10, gt=0)
+    max_scale_count: int = Field(50, gt=0)
+    error_threshold: float = Field(5.0, gt=0)
+
+
+class MultiSourceCalibrationResponse(MultiSourceCalibrationBase):
+    id: int
+    status: str
+    is_locked: bool
+    locked_at: Optional[datetime] = None
+    locked_by: Optional[str] = None
+    final_scheme_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MultiSourceFittingResultResponse(BaseModel):
+    id: int
+    calibration_id: int
+    experiment_id: int
+    experiment_name: Optional[str] = None
+    calibrated_orifice_diameter: float
+    calibrated_discharge_coefficient: float
+    rmse: float
+    mae: float
+    r_squared: float
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ConsistencyAnalysisResponse(BaseModel):
+    id: int
+    calibration_id: int
+    overall_consistency_score: float
+    parameter_consistency: Dict[str, Any]
+    metric_consistency: Dict[str, Any]
+    outlier_experiments: Optional[List[Any]] = None
+    conclusion: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MultiSourceCandidateSchemeResponse(BaseModel):
+    id: int
+    calibration_id: int
+    name: str
+    scale_count: int
+    time_interval: float
+    error_threshold: float
+    combined_orifice_diameter: float
+    combined_discharge_coefficient: float
+    avg_error: float
+    max_error: float
+    exceeds_count: int
+    overall_score: float
+    rank: int
+    is_eliminated: bool
+    elimination_reason: Optional[str] = None
+    is_final: bool
+    created_at: Optional[datetime] = None
+    expert_scores: List[Dict[str, Any]] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ExpertScoreCreate(BaseModel):
+    candidate_scheme_id: int = Field(..., gt=0)
+    expert_name: str = Field(..., min_length=1, max_length=100)
+    accuracy_score: float = Field(..., ge=0, le=100)
+    feasibility_score: float = Field(..., ge=0, le=100)
+    historical_consistency_score: float = Field(..., ge=0, le=100)
+    comments: Optional[str] = None
+
+
+class ExpertScoreResponse(BaseModel):
+    id: int
+    candidate_scheme_id: int
+    expert_name: str
+    accuracy_score: float
+    feasibility_score: float
+    historical_consistency_score: float
+    overall_score: float
+    comments: Optional[str] = None
+    scored_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ExpertReviewCreate(BaseModel):
+    expert_name: str = Field(..., min_length=1, max_length=100)
+    review_result: str = Field(..., pattern="^(approved|rejected|needs_revision|pending)$")
+    overall_comments: Optional[str] = None
+    recommendations: Optional[str] = None
+
+
+class ExpertReviewResponse(BaseModel):
+    id: int
+    calibration_id: int
+    expert_name: str
+    review_result: str
+    overall_comments: Optional[str] = None
+    recommendations: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SchemeEliminationCreate(BaseModel):
+    candidate_scheme_id: int = Field(..., gt=0)
+    eliminated_by: str = Field(..., min_length=1, max_length=100)
+    elimination_reason: str = Field(..., min_length=1)
+    elimination_criteria: Optional[str] = None
+
+
+class SchemeEliminationResponse(BaseModel):
+    id: int
+    calibration_id: int
+    candidate_scheme_id: int
+    candidate_scheme_name: Optional[str] = None
+    eliminated_by: str
+    elimination_reason: str
+    elimination_criteria: Optional[str] = None
+    eliminated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SchemeVersionRecordResponse(BaseModel):
+    id: int
+    calibration_id: int
+    version_number: int
+    parent_version_id: Optional[int] = None
+    candidate_scheme_id: Optional[int] = None
+    change_description: str
+    changed_by: str
+    version_data: Optional[Dict[str, Any]] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class VersionCompareRequest(BaseModel):
+    version1_id: int = Field(..., gt=0)
+    version2_id: int = Field(..., gt=0)
+
+
+class VersionCompareResponse(BaseModel):
+    version1: SchemeVersionRecordResponse
+    version2: SchemeVersionRecordResponse
+    differences: Dict[str, Any]
+    similarity_score: float
+
+
+class FinalizeSchemeRequest(BaseModel):
+    candidate_scheme_id: int = Field(..., gt=0)
+    locked_by: str = Field(..., min_length=1, max_length=100)
+    version_description: str = Field(..., min_length=1)
+
+
+class ReviewReportGenerateRequest(BaseModel):
+    report_type: str = Field("full", pattern="^(full|summary|technical|expert_review)$")
+    report_format: str = Field("json", pattern="^(json|csv|markdown)$")
+    generated_by: Optional[str] = None
+
+
+class MultiSourceCalibrationDetailResponse(BaseModel):
+    calibration: MultiSourceCalibrationResponse
+    experiments: List[Dict[str, Any]]
+    fitting_results: List[MultiSourceFittingResultResponse]
+    consistency_analysis: Optional[ConsistencyAnalysisResponse] = None
+    candidate_schemes: List[MultiSourceCandidateSchemeResponse]
+    expert_reviews: List[ExpertReviewResponse]
+    scheme_eliminations: List[SchemeEliminationResponse]
+    version_records: List[SchemeVersionRecordResponse]
+    review_reports: List[Dict[str, Any]]

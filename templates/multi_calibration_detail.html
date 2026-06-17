@@ -1,0 +1,1102 @@
+{% extends "base.html" %}
+
+{% block title %}多源校准详情 - {{ calibration.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>多源实验对比校准详情</h2>
+    <div>
+        <a href="/containers/{{ container.id }}/multi_calibrations" class="btn btn-secondary">返回列表</a>
+        <a href="/multi_calibrations/{{ calibration.id }}/export" class="btn btn-success">导出JSON</a>
+        <a href="/multi_calibrations/{{ calibration.id }}/export/csv" class="btn btn-success">导出CSV</a>
+    </div>
+</div>
+
+<div class="stat-cards">
+    <div class="stat-card {% if consistency_analysis and consistency_analysis.overall_consistency_score >= 75 %}success{% elif consistency_analysis and consistency_analysis.overall_consistency_score >= 60 %}warning{% else %}danger{% endif %}">
+        <div class="stat-value">{{ "%.1f"|format(consistency_analysis.overall_consistency_score if consistency_analysis else 0) }}%</div>
+        <div class="stat-label">数据一致性评分</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ experiments|length }}</div>
+        <div class="stat-label">实验数据组数</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ candidate_schemes|length }}</div>
+        <div class="stat-label">候选方案总数</div>
+    </div>
+    <div class="stat-card {% if calibration.is_locked %}success{% endif %}">
+        <div class="stat-value">
+            {% if calibration.is_locked %}已锁定{% else %}未锁定{% endif %}
+        </div>
+        <div class="stat-label">当前状态</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>基本信息</h3>
+    <div class="info-grid">
+        <div class="info-item">
+            <div class="label">校准名称</div>
+            <div class="value">{{ calibration.name }}</div>
+        </div>
+        <div class="info-item">
+            <div class="label">校准方法</div>
+            <div class="value">
+                {% if calibration.calibration_method == 'weighted_average' %}加权平均
+                {% elif calibration.calibration_method == 'mean' %}算术平均
+                {% elif calibration.calibration_method == 'median' %}中位数
+                {% elif calibration.calibration_method == 'robust_mean' %}稳健均值
+                {% else %}{{ calibration.calibration_method }}
+                {% endif %}
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">状态</div>
+            <div class="value">
+                {% if calibration.status == 'finalized' %}<span class="badge badge-success">已定稿</span>
+                {% elif calibration.status == 'candidates_generated' %}<span class="badge badge-info">候选方案已生成</span>
+                {% else %}<span class="badge badge-warning">{{ calibration.status }}</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">锁定状态</div>
+            <div class="value">
+                {% if calibration.is_locked %}
+                <span class="badge badge-success">已锁定</span>
+                <small>（{{ calibration.locked_by }}，{{ calibration.locked_at.strftime('%Y-%m-%d %H:%M') if calibration.locked_at else '' }}）</small>
+                {% else %}
+                <span class="badge badge-secondary">未锁定</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% if calibration.notes %}
+    <div style="margin-top: 15px;">
+        <strong>备注：</strong>{{ calibration.notes }}
+    </div>
+    {% endif %}
+</div>
+
+<div class="tabs">
+    <a href="#tab-experiments" class="tab active" onclick="switchTab('experiments')">实验数据</a>
+    <a href="#tab-fitting" class="tab" onclick="switchTab('fitting')">拟合曲线对比</a>
+    <a href="#tab-consistency" class="tab" onclick="switchTab('consistency')">一致性分析</a>
+    <a href="#tab-candidates" class="tab" onclick="switchTab('candidates')">候选方案</a>
+    <a href="#tab-experts" class="tab" onclick="switchTab('experts')">专家评审</a>
+    <a href="#tab-eliminations" class="tab" onclick="switchTab('eliminations')">淘汰记录</a>
+    <a href="#tab-versions" class="tab" onclick="switchTab('versions')">版本管理</a>
+    <a href="#tab-conclusion" class="tab" onclick="switchTab('conclusion')">制度化评审结论</a>
+</div>
+
+<!-- 实验数据 -->
+<div id="tab-experiments" class="tab-content">
+    <div class="card">
+        <h3>关联实验数据</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>实验ID</th>
+                    <th>实验名称</th>
+                    <th>数据点数</th>
+                    <th>权重</th>
+                    <th>是否纳入</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for exp in experiments %}
+                <tr>
+                    <td>{{ exp.id }}</td>
+                    <td>{{ exp.name }}</td>
+                    <td>{{ exp.data_point_count }}</td>
+                    <td>{{ exp.weight }}</td>
+                    <td>
+                        {% if exp.is_included %}
+                        <span class="badge badge-success">是</span>
+                        {% else %}
+                        <span class="badge badge-secondary">否</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 拟合曲线对比 -->
+<div id="tab-fitting" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>多源实验拟合曲线对比</h3>
+        <div id="fitting-comparison-plot" class="plot-container"></div>
+    </div>
+
+    {% if fitting_results %}
+    <div class="card">
+        <h3>各实验拟合结果</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>实验名称</th>
+                    <th>校准孔径</th>
+                    <th>校准流量系数</th>
+                    <th>RMSE</th>
+                    <th>MAE</th>
+                    <th>R²</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for fr in fitting_results %}
+                <tr>
+                    <td>{{ fr.experiment.name if fr.experiment else '-' }}</td>
+                    <td>{{ "%.6f"|format(fr.calibrated_orifice_diameter) }}</td>
+                    <td>{{ "%.6f"|format(fr.calibrated_discharge_coefficient) }}</td>
+                    <td>{{ "%.4f"|format(fr.rmse) }}</td>
+                    <td>{{ "%.4f"|format(fr.mae) }}</td>
+                    <td>{{ "%.4f"|format(fr.r_squared) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 一致性分析 -->
+<div id="tab-consistency" class="tab-content" style="display: none;">
+    {% if consistency_analysis %}
+    <div class="card">
+        <h3>一致性分析结论</h3>
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="label">整体一致性评分</div>
+                <div class="value {% if consistency_analysis.overall_consistency_score >= 90 %}text-success{% elif consistency_analysis.overall_consistency_score >= 60 %}text-warning{% else %}text-danger{% endif %}">
+                    {{ "%.2f"|format(consistency_analysis.overall_consistency_score) }}/100
+                </div>
+            </div>
+        </div>
+        <div style="margin-top: 15px; padding: 15px; background: #f7fafc; border-radius: 8px;">
+            <strong>结论：</strong>{{ consistency_analysis.conclusion }}
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>参数一致性</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>参数</th>
+                    <th>均值</th>
+                    <th>中位数</th>
+                    <th>标准差</th>
+                    <th>变异系数(%)</th>
+                    <th>是否一致</th>
+                    <th>一致性评分</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for param_name, param_data in consistency_analysis.parameter_consistency.items() %}
+                <tr>
+                    <td>{% if param_name == 'orifice_diameter' %}出水孔径{% else %}流量系数{% endif %}</td>
+                    <td>{{ "%.6f"|format(param_data.stats.mean) }}</td>
+                    <td>{{ "%.6f"|format(param_data.stats.median) }}</td>
+                    <td>{{ "%.6f"|format(param_data.stats.std) }}</td>
+                    <td>{{ "%.2f"|format(param_data.stats.cv) }}%</td>
+                    <td>
+                        {% if param_data.consistent %}
+                        <span class="badge badge-success">是</span>
+                        {% else %}
+                        <span class="badge badge-danger">否</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ "%.1f"|format(param_data.consistency_score) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if consistency_analysis.outlier_experiments %}
+    <div class="card">
+        <h3>异常实验检测</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>实验ID</th>
+                    <th>实验名称</th>
+                    <th>异常原因</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for outlier in consistency_analysis.outlier_experiments %}
+                <tr class="highlight-error">
+                    <td>{{ outlier.experiment_id }}</td>
+                    <td>{{ outlier.experiment_name or '-' }}</td>
+                    <td>{{ outlier.reasons|join('; ') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="card empty-state">
+        <p>暂无一致性分析结果</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 候选方案 -->
+<div id="tab-candidates" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>候选方案对比</h3>
+        <div id="candidates-comparison-plot" class="plot-container"></div>
+    </div>
+
+    <div class="card">
+        <h3>候选方案列表</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>排名</th>
+                    <th>方案名称</th>
+                    <th>刻度数</th>
+                    <th>时间间隔</th>
+                    <th>平均误差</th>
+                    <th>最大误差</th>
+                    <th>超阈值数</th>
+                    <th>综合评分</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cs in candidate_schemes %}
+                <tr {% if cs.is_final %}class="highlight-success" style="background: #f0fff4;"{% elif cs.is_eliminated %}class="highlight-error" style="background: #fff5f5;"{% endif %}>
+                    <td><span class="badge badge-info">#{{ cs.rank }}</span></td>
+                    <td>
+                        <strong>{{ cs.name }}</strong>
+                        {% if cs.is_final %}<span class="badge badge-success">最终方案</span>{% endif %}
+                        {% if cs.is_eliminated %}<span class="badge badge-danger">已淘汰</span>{% endif %}
+                    </td>
+                    <td>{{ cs.scale_count }}</td>
+                    <td>{{ "%.2f"|format(cs.time_interval) }}s</td>
+                    <td>{{ "%.4f"|format(cs.avg_error) }}s</td>
+                    <td>{{ "%.4f"|format(cs.max_error) }}s</td>
+                    <td>
+                        {% if cs.exceeds_count > 0 %}
+                        <span class="badge badge-danger">{{ cs.exceeds_count }}</span>
+                        {% else %}
+                        <span class="badge badge-success">0</span>
+                        {% endif %}
+                    </td>
+                    <td><strong>{{ "%.1f"|format(cs.overall_score) }}</strong></td>
+                    <td>
+                        {% if cs.is_final %}<span class="badge badge-success">最终</span>
+                        {% elif cs.is_eliminated %}<span class="badge badge-danger">已淘汰</span>
+                        {% else %}<span class="badge badge-info">候选</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="table-actions">
+                            <button onclick="showMarksPlot({{ cs.id }})" class="btn btn-sm btn-secondary">查看刻度</button>
+                            {% if not cs.is_eliminated and not cs.is_final and not calibration.is_locked %}
+                            <button onclick="openScoreModal({{ cs.id }})" class="btn btn-sm btn-primary">专家评分</button>
+                            <button onclick="openEliminateModal({{ cs.id }}, '{{ cs.name }}')" class="btn btn-sm btn-danger">淘汰</button>
+                            {% endif %}
+                            {% if not cs.is_eliminated and not cs.is_final and not calibration.is_locked %}
+                            <button onclick="openFinalizeModal({{ cs.id }}, '{{ cs.name }}')" class="btn btn-sm btn-success">定稿</button>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>方案刻度误差分布</h3>
+        <div id="marks-error-plot" class="plot-container"></div>
+        <div id="selected-scheme-info" style="margin-top: 10px; color: #718096;"></div>
+    </div>
+
+    <div class="card">
+        <h3>专家评分汇总</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>方案名称</th>
+                    <th>专家数</th>
+                    <th>准确度均分</th>
+                    <th>可行性均分</th>
+                    <th>历史一致性均分</th>
+                    <th>综合均分</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cs in candidate_schemes %}
+                {% if cs._expert_scores_list %}
+                <tr>
+                    <td>{{ cs.name }}</td>
+                    <td>{{ cs._expert_scores_list|length }}</td>
+                    <td>{{ "%.1f"|format(cs._expert_scores_list|sum(attribute='accuracy_score') / cs._expert_scores_list|length) }}</td>
+                    <td>{{ "%.1f"|format(cs._expert_scores_list|sum(attribute='feasibility_score') / cs._expert_scores_list|length) }}</td>
+                    <td>{{ "%.1f"|format(cs._expert_scores_list|sum(attribute='historical_consistency_score') / cs._expert_scores_list|length) }}</td>
+                    <td><strong>{{ "%.1f"|format(cs._expert_scores_list|sum(attribute='overall_score') / cs._expert_scores_list|length) }}</strong></td>
+                </tr>
+                {% for score in cs._expert_scores_list %}
+                <tr>
+                    <td colspan="6" style="padding-left: 40px; background: #f7fafc;">
+                        <small>
+                            <strong>{{ score.expert_name }}</strong>：
+                            准确度 {{ score.accuracy_score }} /
+                            可行性 {{ score.feasibility_score }} /
+                            历史一致性 {{ score.historical_consistency_score }} /
+                            综合 {{ score.overall_score }}
+                            {% if score.comments %}<br>评语：{{ score.comments }}{% endif %}
+                        </small>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 专家评审 -->
+<div id="tab-experts" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>提交专家评审</h3>
+        <form id="expert-review-form">
+            <div class="form-group">
+                <label for="expert_name_review">专家姓名</label>
+                <input type="text" id="expert_name_review" required placeholder="请输入专家姓名">
+            </div>
+            <div class="form-group">
+                <label for="review_result">评审结果</label>
+                <select id="review_result" required>
+                    <option value="approved">通过</option>
+                    <option value="needs_revision">需修订</option>
+                    <option value="rejected">拒绝</option>
+                    <option value="pending">待定</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="overall_comments">总体意见</label>
+                <textarea id="overall_comments" rows="3" placeholder="请输入总体评审意见"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="recommendations">建议</label>
+                <textarea id="recommendations" rows="3" placeholder="请输入改进建议（可选）"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">提交评审</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>评审历史</h3>
+        {% if expert_reviews %}
+        <table>
+            <thead>
+                <tr>
+                    <th>专家</th>
+                    <th>结果</th>
+                    <th>总体意见</th>
+                    <th>建议</th>
+                    <th>时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for er in expert_reviews %}
+                <tr>
+                    <td>{{ er.expert_name }}</td>
+                    <td>
+                        {% if er.review_result == 'approved' %}
+                        <span class="badge badge-success">通过</span>
+                        {% elif er.review_result == 'rejected' %}
+                        <span class="badge badge-danger">拒绝</span>
+                        {% elif er.review_result == 'needs_revision' %}
+                        <span class="badge badge-warning">需修订</span>
+                        {% else %}
+                        <span class="badge badge-info">待定</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ er.overall_comments or '-' }}</td>
+                    <td>{{ er.recommendations or '-' }}</td>
+                    <td>{{ er.reviewed_at.strftime('%Y-%m-%d %H:%M') if er.reviewed_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无评审记录</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 淘汰记录 -->
+<div id="tab-eliminations" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>方案淘汰记录</h3>
+        {% if scheme_eliminations %}
+        <table>
+            <thead>
+                <tr>
+                    <th>方案名称</th>
+                    <th>淘汰操作人</th>
+                    <th>淘汰原因</th>
+                    <th>淘汰标准</th>
+                    <th>时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for se in scheme_eliminations %}
+                <tr class="highlight-error">
+                    <td>{{ se.candidate_scheme.name if se.candidate_scheme else '-' }}</td>
+                    <td>{{ se.eliminated_by }}</td>
+                    <td>{{ se.elimination_reason }}</td>
+                    <td>{{ se.elimination_criteria or '-' }}</td>
+                    <td>{{ se.eliminated_at.strftime('%Y-%m-%d %H:%M') if se.eliminated_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无方案淘汰记录</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 版本管理 -->
+<div id="tab-versions" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>版本记录</h3>
+        {% if version_records %}
+        <table>
+            <thead>
+                <tr>
+                    <th>版本号</th>
+                    <th>关联方案</th>
+                    <th>变更说明</th>
+                    <th>操作人</th>
+                    <th>时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for vr in version_records %}
+                <tr>
+                    <td><strong>v{{ vr.version_number }}</strong></td>
+                    <td>{{ vr.candidate_scheme.name if vr.candidate_scheme else '-' }}</td>
+                    <td>{{ vr.change_description }}</td>
+                    <td>{{ vr.changed_by }}</td>
+                    <td>{{ vr.created_at.strftime('%Y-%m-%d %H:%M') if vr.created_at else '-' }}</td>
+                    <td>
+                        {% if version_records|length > 1 %}
+                        <select class="version-compare-select" onchange="compareVersion({{ vr.id }}, this.value)">
+                            <option value="">选择对比版本</option>
+                            {% for vr2 in version_records %}
+                            {% if vr2.id != vr.id %}
+                            <option value="{{ vr2.id }}">v{{ vr2.version_number }}</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无版本记录，请先选择最终方案并锁定</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <div id="version-comparison-result" style="display: none;">
+        <div class="card">
+            <h3>版本对比结果</h3>
+            <div id="comparison-content"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 制度化评审结论 -->
+<div id="tab-conclusion" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>制度化评审结论</h3>
+        <div id="institutional-conclusion"></div>
+    </div>
+
+    <div class="card">
+        <h3>生成评审报告</h3>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="report_type">报告类型</label>
+                <select id="report_type">
+                    <option value="full">完整报告</option>
+                    <option value="summary">摘要报告</option>
+                    <option value="technical">技术报告</option>
+                    <option value="expert_review">专家评审报告</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="report_format">报告格式</label>
+                <select id="report_format">
+                    <option value="json">JSON</option>
+                    <option value="markdown">Markdown</option>
+                    <option value="csv">CSV</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="generated_by">生成人</label>
+                <input type="text" id="generated_by" placeholder="请输入生成人姓名">
+            </div>
+        </div>
+        <button onclick="generateReport()" class="btn btn-primary">生成评审报告</button>
+    </div>
+
+    {% if review_reports %}
+    <div class="card">
+        <h3>历史报告</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>报告ID</th>
+                    <th>类型</th>
+                    <th>格式</th>
+                    <th>生成人</th>
+                    <th>时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rr in review_reports %}
+                <tr>
+                    <td>{{ rr.id }}</td>
+                    <td>{{ rr.report_type }}</td>
+                    <td>{{ rr.report_format }}</td>
+                    <td>{{ rr.generated_by or '-' }}</td>
+                    <td>{{ rr.created_at.strftime('%Y-%m-%d %H:%M') if rr.created_at else '-' }}</td>
+                    <td>
+                        <button onclick="viewReport({{ rr.id }})" class="btn btn-sm btn-secondary">查看</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 专家评分弹窗 -->
+<div id="score-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div class="modal-content" style="background: white; margin: 5% auto; padding: 30px; max-width: 500px; border-radius: 8px;">
+        <h3 style="margin-top: 0;">专家评分</h3>
+        <p id="score-scheme-name" style="color: #718096;"></p>
+        <form id="score-form">
+            <input type="hidden" id="score_candidate_id">
+            <div class="form-group">
+                <label for="expert_name">专家姓名</label>
+                <input type="text" id="expert_name" required>
+            </div>
+            <div class="form-group">
+                <label for="accuracy_score">准确度评分 (0-100)</label>
+                <input type="number" id="accuracy_score" min="0" max="100" value="80" required>
+            </div>
+            <div class="form-group">
+                <label for="feasibility_score">可行性评分 (0-100)</label>
+                <input type="number" id="feasibility_score" min="0" max="100" value="80" required>
+            </div>
+            <div class="form-group">
+                <label for="historical_consistency_score">历史一致性评分 (0-100)</label>
+                <input type="number" id="historical_consistency_score" min="0" max="100" value="80" required>
+            </div>
+            <div class="form-group">
+                <label for="score_comments">评语</label>
+                <textarea id="score_comments" rows="3" placeholder="请输入评语（可选）"></textarea>
+            </div>
+            <div style="text-align: right;">
+                <button type="button" onclick="closeScoreModal()" class="btn btn-secondary">取消</button>
+                <button type="submit" class="btn btn-primary">提交评分</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 淘汰弹窗 -->
+<div id="eliminate-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div class="modal-content" style="background: white; margin: 5% auto; padding: 30px; max-width: 500px; border-radius: 8px;">
+        <h3 style="margin-top: 0; color: #c53030;">淘汰方案</h3>
+        <p id="eliminate-scheme-name" style="color: #718096;"></p>
+        <form id="eliminate-form">
+            <input type="hidden" id="eliminate_candidate_id">
+            <div class="form-group">
+                <label for="eliminated_by">操作人</label>
+                <input type="text" id="eliminated_by" required>
+            </div>
+            <div class="form-group">
+                <label for="elimination_reason">淘汰原因</label>
+                <textarea id="elimination_reason" rows="3" required placeholder="请输入淘汰原因"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="elimination_criteria">淘汰标准（可选）</label>
+                <input type="text" id="elimination_criteria" placeholder="如：误差过大、专家评分过低等">
+            </div>
+            <div style="text-align: right;">
+                <button type="button" onclick="closeEliminateModal()" class="btn btn-secondary">取消</button>
+                <button type="submit" class="btn btn-danger">确认淘汰</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 定稿弹窗 -->
+<div id="finalize-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div class="modal-content" style="background: white; margin: 5% auto; padding: 30px; max-width: 500px; border-radius: 8px;">
+        <h3 style="margin-top: 0; color: #2f855a;">确认定稿</h3>
+        <p id="finalize-scheme-name" style="color: #718096;"></p>
+        <div class="alert-warning" style="padding: 10px; background: #fffaf0; border-radius: 4px; margin-bottom: 15px;">
+            <strong>注意：</strong>定稿后将锁定该校准记录，无法再修改。
+        </div>
+        <form id="finalize-form">
+            <input type="hidden" id="finalize_candidate_id">
+            <div class="form-group">
+                <label for="locked_by">锁定操作人</label>
+                <input type="text" id="locked_by" required>
+            </div>
+            <div class="form-group">
+                <label for="version_description">版本说明</label>
+                <textarea id="version_description" rows="3" required placeholder="请输入版本变更说明"></textarea>
+            </div>
+            <div style="text-align: right;">
+                <button type="button" onclick="closeFinalizeModal()" class="btn btn-secondary">取消</button>
+                <button type="submit" class="btn btn-success">确认定稿并锁定</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const calibrationId = {{ calibration.id }};
+const candidateSchemes = {{ candidate_schemes|length }};
+
+function switchTab(tabName) {
+    document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + tabName).style.display = 'block';
+    event.target.classList.add('active');
+    event.preventDefault();
+
+    if (tabName === 'fitting') loadFittingComparison();
+    if (tabName === 'candidates') loadCandidatesComparison();
+    if (tabName === 'conclusion') loadInstitutionalConclusion();
+}
+
+async function loadFittingComparison() {
+    const resp = await fetch(`/api/multi_calibrations/${calibrationId}/detail`);
+    const data = await resp.json();
+    const fittingResults = data.fitting_results;
+
+    const traces = [];
+    fittingResults.forEach((fr, idx) => {
+        if (fr.fitting_curve && fr.fitting_curve.length > 0) {
+            traces.push({
+                x: fr.fitting_curve.map(p => p.time),
+                y: fr.fitting_curve.map(p => p.level),
+                mode: 'lines',
+                name: fr.experiment_name || `实验${idx + 1}拟合曲线`,
+                line: { width: 2 }
+            });
+        }
+    });
+
+    const layout = {
+        title: '多源实验拟合曲线对比',
+        xaxis: { title: '时间 (秒)' },
+        yaxis: { title: '水位 (cm)' },
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 50, r: 20, t: 50, b: 60 }
+    };
+
+    Plotly.newPlot('fitting-comparison-plot', traces, layout, { responsive: true });
+}
+
+async function loadCandidatesComparison() {
+    const resp = await fetch(`/api/multi_calibrations/${calibrationId}/detail`);
+    const data = await resp.json();
+    const schemes = data.candidate_schemes.filter(s => !s.is_eliminated);
+
+    const trace1 = {
+        x: schemes.map(s => s.name),
+        y: schemes.map(s => s.avg_error),
+        type: 'bar',
+        name: '平均误差',
+        marker: { color: '#3182ce' }
+    };
+
+    const trace2 = {
+        x: schemes.map(s => s.name),
+        y: schemes.map(s => s.max_error),
+        type: 'bar',
+        name: '最大误差',
+        marker: { color: '#e53e3e' }
+    };
+
+    const trace3 = {
+        x: schemes.map(s => s.name),
+        y: schemes.map(s => s.overall_score),
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: '综合评分',
+        yaxis: 'y2',
+        line: { color: '#38a169', width: 3 },
+        marker: { size: 10 }
+    };
+
+    const layout = {
+        title: '候选方案误差与评分对比',
+        xaxis: { title: '方案名称' },
+        yaxis: { title: '误差 (秒)' },
+        yaxis2: { title: '综合评分', overlaying: 'y', side: 'right', range: [0, 100] },
+        barmode: 'group',
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 50, r: 50, t: 50, b: 80 }
+    };
+
+    Plotly.newPlot('candidates-comparison-plot', [trace1, trace2, trace3], layout, { responsive: true });
+}
+
+async function showMarksPlot(schemeId) {
+    const resp = await fetch(`/api/multi_candidates/${schemeId}/marks`);
+    const data = await resp.json();
+    const marks = data.marks;
+    const threshold = data.error_threshold;
+
+    const trace1 = {
+        x: marks.map(m => m.scale_index),
+        y: marks.map(m => m.error),
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: '刻度误差',
+        line: { color: '#3182ce' },
+        marker: {
+            color: marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#38a169'),
+            size: 8
+        }
+    };
+
+    const trace2 = {
+        x: marks.map(m => m.scale_index),
+        y: marks.map(() => threshold),
+        type: 'line',
+        name: '误差阈值',
+        line: { color: '#d69e2e', dash: 'dash' }
+    };
+
+    const layout = {
+        title: `${data.scheme_name} - 刻度误差分布`,
+        xaxis: { title: '刻度序号' },
+        yaxis: { title: '误差 (秒)' },
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 50, r: 20, t: 50, b: 50 }
+    };
+
+    Plotly.newPlot('marks-error-plot', [trace1, trace2], layout, { responsive: true });
+    document.getElementById('selected-scheme-info').innerHTML =
+        `当前显示：${data.scheme_name}（刻度数: ${data.scale_count}，时间间隔: ${data.time_interval.toFixed(2)}秒）`;
+}
+
+function openScoreModal(candidateId) {
+    document.getElementById('score_candidate_id').value = candidateId;
+    document.getElementById('score-scheme-name').textContent = '为方案 #' + candidateId + ' 评分';
+    document.getElementById('score-modal').style.display = 'block';
+}
+
+function closeScoreModal() {
+    document.getElementById('score-modal').style.display = 'none';
+    document.getElementById('score-form').reset();
+}
+
+document.getElementById('score-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+        candidate_scheme_id: parseInt(document.getElementById('score_candidate_id').value),
+        expert_name: document.getElementById('expert_name').value,
+        accuracy_score: parseFloat(document.getElementById('accuracy_score').value),
+        feasibility_score: parseFloat(document.getElementById('feasibility_score').value),
+        historical_consistency_score: parseFloat(document.getElementById('historical_consistency_score').value),
+        comments: document.getElementById('score_comments').value || null
+    };
+
+    try {
+        const resp = await fetch('/api/expert_scores', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if (result.success) {
+            alert('评分提交成功！');
+            closeScoreModal();
+            location.reload();
+        } else {
+            alert('提交失败');
+        }
+    } catch (err) {
+        alert('提交失败：' + err.message);
+    }
+});
+
+function openEliminateModal(candidateId, schemeName) {
+    document.getElementById('eliminate_candidate_id').value = candidateId;
+    document.getElementById('eliminate-scheme-name').textContent = '淘汰方案：' + schemeName;
+    document.getElementById('eliminate-modal').style.display = 'block';
+}
+
+function closeEliminateModal() {
+    document.getElementById('eliminate-modal').style.display = 'none';
+    document.getElementById('eliminate-form').reset();
+}
+
+document.getElementById('eliminate-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+        candidate_scheme_id: parseInt(document.getElementById('eliminate_candidate_id').value),
+        eliminated_by: document.getElementById('eliminated_by').value,
+        elimination_reason: document.getElementById('elimination_reason').value,
+        elimination_criteria: document.getElementById('elimination_criteria').value || null
+    };
+
+    try {
+        const resp = await fetch('/api/scheme_eliminations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if (result.success) {
+            alert('方案已淘汰！');
+            closeEliminateModal();
+            location.reload();
+        } else {
+            alert('操作失败');
+        }
+    } catch (err) {
+        alert('操作失败：' + err.message);
+    }
+});
+
+function openFinalizeModal(candidateId, schemeName) {
+    document.getElementById('finalize_candidate_id').value = candidateId;
+    document.getElementById('finalize-scheme-name').textContent = '选定最终方案：' + schemeName;
+    document.getElementById('finalize-modal').style.display = 'block';
+}
+
+function closeFinalizeModal() {
+    document.getElementById('finalize-modal').style.display = 'none';
+    document.getElementById('finalize-form').reset();
+}
+
+document.getElementById('finalize-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!confirm('确认定稿？定稿后将无法修改此校准记录。')) return;
+
+    const payload = {
+        candidate_scheme_id: parseInt(document.getElementById('finalize_candidate_id').value),
+        locked_by: document.getElementById('locked_by').value,
+        version_description: document.getElementById('version_description').value
+    };
+
+    try {
+        const resp = await fetch(`/api/multi_calibrations/${calibrationId}/finalize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if (result.success) {
+            alert('定稿成功！记录已锁定。');
+            closeFinalizeModal();
+            location.reload();
+        } else {
+            alert('操作失败');
+        }
+    } catch (err) {
+        alert('操作失败：' + err.message);
+    }
+});
+
+document.getElementById('expert-review-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+        expert_name: document.getElementById('expert_name_review').value,
+        review_result: document.getElementById('review_result').value,
+        overall_comments: document.getElementById('overall_comments').value || null,
+        recommendations: document.getElementById('recommendations').value || null
+    };
+
+    try {
+        const resp = await fetch(`/api/multi_calibrations/${calibrationId}/expert_reviews`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if (result.success) {
+            alert('评审提交成功！');
+            location.reload();
+        } else {
+            alert('提交失败');
+        }
+    } catch (err) {
+        alert('提交失败：' + err.message);
+    }
+});
+
+async function compareVersion(v1Id, v2Id) {
+    if (!v2Id) return;
+
+    const resp = await fetch('/api/versions/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version1_id: v1Id, version2_id: v2Id })
+    });
+    const result = await resp.json();
+
+    const container = document.getElementById('comparison-content');
+    let html = `
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="label">相似度评分</div>
+                <div class="value">${result.similarity_score.toFixed(2)}%</div>
+            </div>
+            <div class="info-item">
+                <div class="label">差异项数量</div>
+                <div class="value">${result.change_count}</div>
+            </div>
+        </div>
+        <table style="margin-top: 15px;">
+            <thead>
+                <tr>
+                    <th>字段</th>
+                    <th>v${result.version1.version_number}</th>
+                    <th>v${result.version2.version_number}</th>
+                    <th>差异</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+    for (const [key, diff] of Object.entries(result.differences)) {
+        let diffStr = '-';
+        if (diff.percentage_diff !== undefined) {
+            diffStr = `${diff.absolute_diff >= 0 ? '+' : ''}${diff.absolute_diff.toFixed(6)} (${diff.percentage_diff >= 0 ? '+' : ''}${diff.percentage_diff.toFixed(2)}%)`;
+        }
+        html += `<tr>
+            <td>${key}</td>
+            <td>${diff.old_value}</td>
+            <td>${diff.new_value}</td>
+            <td>${diffStr}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+
+    container.innerHTML = html;
+    document.getElementById('version-comparison-result').style.display = 'block';
+    document.getElementById('version-comparison-result').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function loadInstitutionalConclusion() {
+    const resp = await fetch(`/api/multi_calibrations/${calibrationId}/institutional_conclusion`);
+    const result = await resp.json();
+
+    const container = document.getElementById('institutional-conclusion');
+    let html = `<div class="info-grid">
+        <div class="info-item">
+            <div class="label">评审状态</div>
+            <div class="value">
+                ${result.overall_status === 'approved' ? '<span class="badge badge-success">通过</span>' :
+                  result.overall_status === 'needs_revision' ? '<span class="badge badge-warning">需修订</span>' :
+                  '<span class="badge badge-info">待定</span>'}
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">一致性分析完成</div>
+            <div class="value">${result.review_completeness.has_consistency_analysis ? '<span class="badge badge-success">是</span>' : '<span class="badge badge-danger">否</span>'}</div>
+        </div>
+        <div class="info-item">
+            <div class="label">专家评审数</div>
+            <div class="value">${result.review_completeness.expert_review_count}</div>
+        </div>
+        <div class="info-item">
+            <div class="label">已选最终方案</div>
+            <div class="value">${result.review_completeness.has_final_scheme ? '<span class="badge badge-success">是</span>' : '<span class="badge badge-danger">否</span>'}</div>
+        </div>
+    </div>`;
+
+    html += '<div style="margin-top: 20px;"><h4>结论</h4><ul>';
+    for (const c of result.conclusions) {
+        html += `<li style="margin: 8px 0;">${c}</li>`;
+    }
+    html += '</ul></div>';
+
+    if (result.recommendations.length > 0) {
+        html += '<div style="margin-top: 20px;"><h4>建议</h4><ul>';
+        for (const r of result.recommendations) {
+            html += `<li style="margin: 8px 0;">${r}</li>`;
+        }
+        html += '</ul></div>';
+    }
+
+    container.innerHTML = html;
+}
+
+async function generateReport() {
+    const payload = {
+        report_type: document.getElementById('report_type').value,
+        report_format: document.getElementById('report_format').value,
+        generated_by: document.getElementById('generated_by').value || null
+    };
+
+    try {
+        const resp = await fetch(`/api/multi_calibrations/${calibrationId}/reports`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if (result.success) {
+            alert('报告生成成功！报告ID: ' + result.report_id);
+            location.reload();
+        } else {
+            alert('生成失败');
+        }
+    } catch (err) {
+        alert('生成失败：' + err.message);
+    }
+}
+
+async function viewReport(reportId) {
+    const resp = await fetch(`/api/review_reports/${reportId}`);
+    const data = await resp.json();
+    window.open().document.write('<pre>' + JSON.stringify(data.report_content, null, 2) + '</pre>');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (candidateSchemes > 0) {
+        showMarksPlot({{ candidate_schemes[0].id }});
+    }
+});
+</script>
+{% endblock %}

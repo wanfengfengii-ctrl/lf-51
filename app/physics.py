@@ -731,3 +731,574 @@ def generate_dynasty_export(
         "stages": stages,
         "generated_at": None
     }
+
+
+def calculate_statistics(values: List[float]) -> Dict[str, float]:
+    if not values:
+        return {"mean": 0.0, "median": 0.0, "std": 0.0, "min": 0.0, "max": 0.0, "cv": 0.0}
+    
+    n = len(values)
+    mean_val = sum(values) / n
+    
+    sorted_vals = sorted(values)
+    if n % 2 == 0:
+        median_val = (sorted_vals[n//2 - 1] + sorted_vals[n//2]) / 2
+    else:
+        median_val = sorted_vals[n//2]
+    
+    variance = sum((v - mean_val) ** 2 for v in values) / max(1, n)
+    std_val = math.sqrt(variance)
+    cv_val = (std_val / abs(mean_val) * 100) if mean_val != 0 else 0.0
+    
+    return {
+        "mean": mean_val,
+        "median": median_val,
+        "std": std_val,
+        "min": min(values),
+        "max": max(values),
+        "cv": cv_val
+    }
+
+
+def robust_mean(values: List[float], trim_percent: float = 0.2) -> float:
+    if not values:
+        return 0.0
+    
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    trim_count = int(n * trim_percent)
+    
+    if trim_count * 2 >= n:
+        return calculate_statistics(values)["median"]
+    
+    trimmed = sorted_vals[trim_count:n - trim_count]
+    return sum(trimmed) / len(trimmed)
+
+
+def multi_source_calibrate(
+    experiments_data: List[Dict[str, Any]],
+    initial_water_level: float,
+    initial_orifice_diameter: float,
+    shape: str,
+    capacity: float,
+    shape_params: Optional[str] = None,
+    calibration_method: str = "weighted_average"
+) -> Dict[str, Any]:
+    if not experiments_data:
+        raise ValueError("至少需要一组实验数据")
+    
+    fitting_results = []
+    
+    for exp_data in experiments_data:
+        exp_points = exp_data["points"]
+        weight = exp_data.get("weight", 1.0)
+        is_included = exp_data.get("is_included", True)
+        
+        if not is_included or len(exp_points) < 2:
+            continue
+        
+        result = calibrate_parameters(
+            exp_points,
+            initial_water_level,
+            initial_orifice_diameter,
+            shape,
+            capacity,
+            shape_params
+        )
+        
+        fitted_curve = generate_fitted_curve(
+            result, initial_water_level, shape, capacity, shape_params
+        )
+        
+        fitting_results.append({
+            "experiment_id": exp_data.get("experiment_id"),
+            "experiment_name": exp_data.get("experiment_name"),
+            "weight": weight,
+            "calibrated_orifice_diameter": result["orifice_diameter"],
+            "calibrated_discharge_coefficient": result["discharge_coefficient"],
+            "rmse": result["rmse"],
+            "mae": result["mae"],
+            "r_squared": result["r_squared"],
+            "fitting_curve": [{"time": t, "level": l} for t, l in fitted_curve]
+        })
+    
+    if not fitting_results:
+        raise ValueError("没有有效的实验数据可以进行校准")
+    
+    orifice_diameters = [r["calibrated_orifice_diameter"] for r in fitting_results]
+    discharge_coefficients = [r["calibrated_discharge_coefficient"] for r in fitting_results]
+    weights = [r["weight"] for r in fitting_results]
+    
+    if calibration_method == "weighted_average":
+        total_weight = sum(weights)
+        combined_orifice = sum(d * w for d, w in zip(orifice_diameters, weights)) / total_weight
+        combined_coeff = sum(d * w for d, w in zip(discharge_coefficients, weights)) / total_weight
+    elif calibration_method == "mean":
+        combined_orifice = sum(orifice_diameters) / len(orifice_diameters)
+        combined_coeff = sum(discharge_coefficients) / len(discharge_coefficients)
+    elif calibration_method == "median":
+        combined_orifice = calculate_statistics(orifice_diameters)["median"]
+        combined_coeff = calculate_statistics(discharge_coefficients)["median"]
+    elif calibration_method == "robust_mean":
+        combined_orifice = robust_mean(orifice_diameters)
+        combined_coeff = robust_mean(discharge_coefficients)
+    else:
+        combined_orifice = sum(orifice_diameters) / len(orifice_diameters)
+        combined_coeff = sum(discharge_coefficients) / len(discharge_coefficients)
+    
+    return {
+        "fitting_results": fitting_results,
+        "combined_params": {
+            "orifice_diameter": round(combined_orifice, 6),
+            "discharge_coefficient": round(combined_coeff, 6),
+            "shape_params": shape_params
+        },
+        "parameter_statistics": {
+            "orifice_diameter": calculate_statistics(orifice_diameters),
+            "discharge_coefficient": calculate_statistics(discharge_coefficients)
+        },
+        "calibration_method": calibration_method
+    }
+
+
+def analyze_consistency(
+    fitting_results: List[Dict[str, Any]],
+    cv_threshold: float = 10.0
+) -> Dict[str, Any]:
+    if len(fitting_results) < 2:
+        return {
+            "overall_consistency_score": 100.0,
+            "parameter_consistency": {},
+            "metric_consistency": {},
+            "outlier_experiments": [],
+            "conclusion": "仅一组实验数据，无需一致性分析"
+        }
+    
+    orifice_diameters = [r["calibrated_orifice_diameter"] for r in fitting_results]
+    discharge_coefficients = [r["calibrated_discharge_coefficient"] for r in fitting_results]
+    rmses = [r["rmse"] for r in fitting_results]
+    maes = [r["mae"] for r in fitting_results]
+    r_squareds = [r["r_squared"] for r in fitting_results]
+    
+    orifice_stats = calculate_statistics(orifice_diameters)
+    coeff_stats = calculate_statistics(discharge_coefficients)
+    rmse_stats = calculate_statistics(rmses)
+    mae_stats = calculate_statistics(maes)
+    r2_stats = calculate_statistics(r_squareds)
+    
+    parameter_consistency = {
+        "orifice_diameter": {
+            "values": orifice_diameters,
+            "stats": orifice_stats,
+            "consistent": orifice_stats["cv"] < cv_threshold,
+            "consistency_score": max(0, 100 - orifice_stats["cv"])
+        },
+        "discharge_coefficient": {
+            "values": discharge_coefficients,
+            "stats": coeff_stats,
+            "consistent": coeff_stats["cv"] < cv_threshold,
+            "consistency_score": max(0, 100 - coeff_stats["cv"])
+        }
+    }
+    
+    metric_consistency = {
+        "rmse": {"values": rmses, "stats": rmse_stats, "consistency_score": max(0, 100 - rmse_stats["cv"])},
+        "mae": {"values": maes, "stats": mae_stats, "consistency_score": max(0, 100 - mae_stats["cv"])},
+        "r_squared": {"values": r_squareds, "stats": r2_stats, "consistency_score": max(0, min(100, r2_stats["mean"] * 100))}
+    }
+    
+    outlier_experiments = []
+    for i, result in enumerate(fitting_results):
+        is_outlier = False
+        outlier_reasons = []
+        
+        if abs(result["calibrated_orifice_diameter"] - orifice_stats["mean"]) > 2 * orifice_stats["std"]:
+            is_outlier = True
+            outlier_reasons.append("孔径参数偏离均值超过2倍标准差")
+        
+        if abs(result["calibrated_discharge_coefficient"] - coeff_stats["mean"]) > 2 * coeff_stats["std"]:
+            is_outlier = True
+            outlier_reasons.append("流量系数偏离均值超过2倍标准差")
+        
+        if result["r_squared"] < 0.9:
+            is_outlier = True
+            outlier_reasons.append(f"拟合优度R²过低({result['r_squared']:.4f})")
+        
+        if is_outlier:
+            outlier_experiments.append({
+                "experiment_id": result.get("experiment_id"),
+                "experiment_name": result.get("experiment_name"),
+                "reasons": outlier_reasons
+            })
+    
+    param_scores = [parameter_consistency[k]["consistency_score"] for k in parameter_consistency]
+    metric_scores = [metric_consistency[k]["consistency_score"] for k in metric_consistency]
+    overall_score = (sum(param_scores) + sum(metric_scores)) / (len(param_scores) + len(metric_scores))
+    
+    if overall_score >= 90:
+        conclusion = "多源实验数据一致性优秀，参数拟合结果稳定可靠"
+    elif overall_score >= 75:
+        conclusion = "多源实验数据一致性良好，参数拟合结果较为可靠"
+    elif overall_score >= 60:
+        conclusion = "多源实验数据一致性一般，建议检查异常实验数据"
+    else:
+        conclusion = "多源实验数据一致性较差，存在显著异常值，建议重新进行实验"
+    
+    return {
+        "overall_consistency_score": round(overall_score, 2),
+        "parameter_consistency": parameter_consistency,
+        "metric_consistency": metric_consistency,
+        "outlier_experiments": outlier_experiments,
+        "analysis_details": {
+            "experiment_count": len(fitting_results),
+            "cv_threshold": cv_threshold
+        },
+        "conclusion": conclusion
+    }
+
+
+def generate_multi_source_candidate_schemes(
+    combined_params: Dict[str, Any],
+    initial_water_level: float,
+    shape: str,
+    capacity: float,
+    shape_params: Optional[str],
+    candidate_count: int = 5,
+    min_scale_count: int = 10,
+    max_scale_count: int = 50,
+    error_threshold: float = 5.0
+) -> List[Dict[str, Any]]:
+    candidates = []
+    experiment_curve = generate_fitted_curve(
+        combined_params, initial_water_level, shape, capacity, shape_params
+    )
+    
+    if not experiment_curve:
+        return []
+    
+    total_duration = experiment_curve[-1][0]
+    
+    scale_counts = []
+    step = max(1, (max_scale_count - min_scale_count) // max(1, candidate_count - 1))
+    for i in range(candidate_count):
+        sc = min_scale_count + i * step
+        if sc <= max_scale_count:
+            scale_counts.append(sc)
+    
+    for idx, scale_count in enumerate(scale_counts):
+        time_interval = total_duration / scale_count
+        
+        marks = generate_scale_marks(
+            scale_count, time_interval, initial_water_level,
+            combined_params['orifice_diameter'], shape, capacity, shape_params,
+            error_threshold, combined_params['discharge_coefficient']
+        )
+        
+        avg_error = calculate_average_error(marks)
+        max_error = calculate_max_error(marks)
+        exceeds_count = sum(1 for m in marks if m['exceeds_threshold'])
+        
+        error_score = 100 - min(100, (avg_error / max(error_threshold, 0.1)) * 50)
+        exceed_score = max(0, 100 - exceeds_count * 10)
+        density_score = 100 - min(50, abs(scale_count - (min_scale_count + max_scale_count) / 2) / max(1, (max_scale_count - min_scale_count) / 2) * 50)
+        
+        overall_score = (error_score * 0.5 + exceed_score * 0.3 + density_score * 0.2)
+        
+        candidates.append({
+            'name': f'联合校准方案 {idx + 1}',
+            'scale_count': scale_count,
+            'time_interval': round(time_interval, 2),
+            'error_threshold': error_threshold,
+            'combined_orifice_diameter': combined_params['orifice_diameter'],
+            'combined_discharge_coefficient': combined_params['discharge_coefficient'],
+            'avg_error': round(avg_error, 4),
+            'max_error': round(max_error, 4),
+            'exceeds_count': exceeds_count,
+            'overall_score': round(overall_score, 2),
+            'marks': marks
+        })
+    
+    candidates.sort(key=lambda x: (-x['overall_score'], x['avg_error'], x['max_error']))
+    
+    for rank, candidate in enumerate(candidates, 1):
+        candidate['rank'] = rank
+        candidate['name'] = f'联合校准方案 {rank} (刻度数:{candidate["scale_count"]}, 评分:{candidate["overall_score"]:.1f})'
+    
+    return candidates
+
+
+def aggregate_expert_scores(
+    expert_scores: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    if not expert_scores:
+        return {
+            "avg_accuracy_score": 0.0,
+            "avg_feasibility_score": 0.0,
+            "avg_historical_score": 0.0,
+            "avg_overall_score": 0.0,
+            "expert_count": 0,
+            "score_distribution": {},
+            "comments_summary": []
+        }
+    
+    accuracy_scores = [s["accuracy_score"] for s in expert_scores]
+    feasibility_scores = [s["feasibility_score"] for s in expert_scores]
+    historical_scores = [s["historical_consistency_score"] for s in expert_scores]
+    overall_scores = [s["overall_score"] for s in expert_scores]
+    comments = [s.get("comments", "") for s in expert_scores if s.get("comments")]
+    
+    def score_distribution(scores):
+        dist = {"excellent": 0, "good": 0, "fair": 0, "poor": 0}
+        for s in scores:
+            if s >= 90:
+                dist["excellent"] += 1
+            elif s >= 75:
+                dist["good"] += 1
+            elif s >= 60:
+                dist["fair"] += 1
+            else:
+                dist["poor"] += 1
+        return dist
+    
+    return {
+        "avg_accuracy_score": round(sum(accuracy_scores) / len(accuracy_scores), 2),
+        "avg_feasibility_score": round(sum(feasibility_scores) / len(feasibility_scores), 2),
+        "avg_historical_score": round(sum(historical_scores) / len(historical_scores), 2),
+        "avg_overall_score": round(sum(overall_scores) / len(overall_scores), 2),
+        "expert_count": len(expert_scores),
+        "score_distribution": score_distribution(overall_scores),
+        "comments_summary": comments
+    }
+
+
+def compare_versions(
+    version1_data: Dict[str, Any],
+    version2_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    differences = {}
+    all_keys = set(version1_data.keys()) | set(version2_data.keys())
+    
+    for key in all_keys:
+        v1 = version1_data.get(key)
+        v2 = version2_data.get(key)
+        
+        if v1 != v2:
+            if isinstance(v1, (int, float)) and isinstance(v2, (int, float)):
+                diff = v2 - v1
+                pct_diff = (diff / abs(v1) * 100) if v1 != 0 else float('inf')
+                differences[key] = {
+                    "old_value": v1,
+                    "new_value": v2,
+                    "absolute_diff": diff,
+                    "percentage_diff": round(pct_diff, 2)
+                }
+            else:
+                differences[key] = {
+                    "old_value": v1,
+                    "new_value": v2
+                }
+    
+    numeric_diffs = []
+    for key, diff in differences.items():
+        if "percentage_diff" in diff and diff["percentage_diff"] != float('inf'):
+            numeric_diffs.append(abs(diff["percentage_diff"]))
+    
+    if numeric_diffs:
+        avg_pct_diff = sum(numeric_diffs) / len(numeric_diffs)
+        similarity_score = max(0, 100 - avg_pct_diff)
+    else:
+        similarity_score = 100.0 if not differences else 50.0
+    
+    return {
+        "differences": differences,
+        "similarity_score": round(similarity_score, 2),
+        "change_count": len(differences)
+    }
+
+
+def generate_review_report_content(
+    calibration: Dict[str, Any],
+    experiments: List[Dict[str, Any]],
+    fitting_results: List[Dict[str, Any]],
+    consistency_analysis: Optional[Dict[str, Any]],
+    candidate_schemes: List[Dict[str, Any]],
+    expert_reviews: List[Dict[str, Any]],
+    scheme_eliminations: List[Dict[str, Any]],
+    version_records: List[Dict[str, Any]],
+    report_type: str = "full"
+) -> Dict[str, Any]:
+    active_schemes = [s for s in candidate_schemes if not s.get("is_eliminated", False)]
+    eliminated_schemes = [s for s in candidate_schemes if s.get("is_eliminated", False)]
+    final_scheme = next((s for s in candidate_schemes if s.get("is_final", False)), None)
+    
+    approved_reviews = [r for r in expert_reviews if r.get("review_result") == "approved"]
+    rejected_reviews = [r for r in expert_reviews if r.get("review_result") == "rejected"]
+    
+    summary = {
+        "calibration_name": calibration.get("name"),
+        "calibration_method": calibration.get("calibration_method"),
+        "status": calibration.get("status"),
+        "is_locked": calibration.get("is_locked"),
+        "experiment_count": len(experiments),
+        "fitting_result_count": len(fitting_results),
+        "total_candidate_schemes": len(candidate_schemes),
+        "active_schemes": len(active_schemes),
+        "eliminated_schemes": len(eliminated_schemes),
+        "expert_review_count": len(expert_reviews),
+        "approved_reviews": len(approved_reviews),
+        "rejected_reviews": len(rejected_reviews),
+        "version_count": len(version_records),
+        "has_final_scheme": final_scheme is not None,
+        "consistency_score": consistency_analysis.get("overall_consistency_score") if consistency_analysis else None
+    }
+    
+    if report_type == "summary":
+        return {
+            "report_type": "summary",
+            "summary": summary,
+            "final_scheme": {
+                "id": final_scheme["id"],
+                "name": final_scheme["name"],
+                "scale_count": final_scheme["scale_count"],
+                "avg_error": final_scheme["avg_error"],
+                "overall_score": final_scheme["overall_score"]
+            } if final_scheme else None,
+            "conclusion": consistency_analysis.get("conclusion") if consistency_analysis else None
+        }
+    
+    elif report_type == "technical":
+        return {
+            "report_type": "technical",
+            "summary": summary,
+            "fitting_results": [{
+                "experiment_id": fr.get("experiment_id"),
+                "experiment_name": fr.get("experiment_name"),
+                "orifice_diameter": fr.get("calibrated_orifice_diameter"),
+                "discharge_coefficient": fr.get("calibrated_discharge_coefficient"),
+                "rmse": fr.get("rmse"),
+                "mae": fr.get("mae"),
+                "r_squared": fr.get("r_squared")
+            } for fr in fitting_results],
+            "consistency_analysis": consistency_analysis,
+            "candidate_schemes": [{
+                "id": cs.get("id"),
+                "name": cs.get("name"),
+                "scale_count": cs.get("scale_count"),
+                "time_interval": cs.get("time_interval"),
+                "avg_error": cs.get("avg_error"),
+                "max_error": cs.get("max_error"),
+                "exceeds_count": cs.get("exceeds_count"),
+                "overall_score": cs.get("overall_score"),
+                "rank": cs.get("rank"),
+                "is_eliminated": cs.get("is_eliminated"),
+                "is_final": cs.get("is_final")
+            } for cs in candidate_schemes]
+        }
+    
+    elif report_type == "expert_review":
+        return {
+            "report_type": "expert_review",
+            "summary": summary,
+            "expert_reviews": [{
+                "expert_name": er.get("expert_name"),
+                "review_result": er.get("review_result"),
+                "overall_comments": er.get("overall_comments"),
+                "recommendations": er.get("recommendations"),
+                "reviewed_at": er.get("reviewed_at")
+            } for er in expert_reviews],
+            "scheme_eliminations": [{
+                "candidate_scheme_name": se.get("candidate_scheme_name"),
+                "eliminated_by": se.get("eliminated_by"),
+                "elimination_reason": se.get("elimination_reason"),
+                "elimination_criteria": se.get("elimination_criteria")
+            } for se in scheme_eliminations]
+        }
+    
+    else:
+        return {
+            "report_type": "full",
+            "summary": summary,
+            "experiments": [{
+                "id": exp.get("id"),
+                "name": exp.get("name"),
+                "data_point_count": exp.get("data_point_count"),
+                "weight": exp.get("weight"),
+                "is_included": exp.get("is_included")
+            } for exp in experiments],
+            "fitting_results": fitting_results,
+            "consistency_analysis": consistency_analysis,
+            "candidate_schemes": candidate_schemes,
+            "expert_reviews": expert_reviews,
+            "scheme_eliminations": scheme_eliminations,
+            "version_records": version_records,
+            "final_scheme": final_scheme,
+            "institutional_review_conclusion": generate_institutional_review_conclusion(
+                summary, consistency_analysis, expert_reviews, final_scheme
+            )
+        }
+
+
+def generate_institutional_review_conclusion(
+    summary: Dict[str, Any],
+    consistency_analysis: Optional[Dict[str, Any]],
+    expert_reviews: List[Dict[str, Any]],
+    final_scheme: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    conclusions = []
+    recommendations = []
+    
+    consistency_score = summary.get("consistency_score", 0)
+    if consistency_score >= 90:
+        conclusions.append("多源实验数据一致性优秀，为刻度复原提供了坚实的数据基础")
+    elif consistency_score >= 75:
+        conclusions.append("多源实验数据一致性良好，满足刻度复原的基本要求")
+    elif consistency_score >= 60:
+        conclusions.append("多源实验数据一致性一般，建议在后续实验中进一步验证")
+        recommendations.append("建议补充更多在不同环境条件下的实验数据")
+    else:
+        conclusions.append("多源实验数据一致性较差，当前结果仅供参考")
+        recommendations.append("强烈建议重新进行校准实验，确保数据质量")
+    
+    if summary["expert_review_count"] >= 3:
+        approval_rate = summary["approved_reviews"] / summary["expert_review_count"]
+        if approval_rate >= 0.8:
+            conclusions.append(f"专家评审通过率达到{approval_rate*100:.0f}%，评审意见高度一致")
+        elif approval_rate >= 0.6:
+            conclusions.append(f"专家评审通过率为{approval_rate*100:.0f}%，基本达成共识")
+        else:
+            conclusions.append(f"专家评审通过率仅为{approval_rate*100:.0f}%，存在较大分歧")
+            recommendations.append("建议组织进一步的专家论证会")
+    elif summary["expert_review_count"] > 0:
+        conclusions.append(f"已完成{summary['expert_review_count']}份专家评审，建议邀请更多专家参与评审")
+        recommendations.append("建议至少邀请3位专家完成评审，确保评审结论的权威性")
+    else:
+        conclusions.append("尚未进行专家评审")
+        recommendations.append("请尽快组织专家评审")
+    
+    if final_scheme:
+        conclusions.append(f"已选定最终方案：{final_scheme.get('name')}")
+        if summary.get("is_locked"):
+            conclusions.append("最终方案已锁定，可用于正式刻度复原")
+        else:
+            recommendations.append("建议尽快完成最终方案的锁定流程")
+    else:
+        conclusions.append("尚未选定最终方案")
+        recommendations.append("请从候选方案中选定最终方案并完成锁定")
+    
+    overall_status = "approved" if (
+        consistency_score >= 75 and
+        summary["approved_reviews"] >= 2 and
+        final_scheme is not None
+    ) else "pending" if summary["expert_review_count"] < 2 else "needs_revision"
+    
+    return {
+        "overall_status": overall_status,
+        "conclusions": conclusions,
+        "recommendations": recommendations,
+        "review_completeness": {
+            "has_consistency_analysis": consistency_analysis is not None,
+            "expert_review_count": summary["expert_review_count"],
+            "has_final_scheme": final_scheme is not None,
+            "is_locked": summary.get("is_locked", False)
+        }
+    }

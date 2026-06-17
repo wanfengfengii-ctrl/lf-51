@@ -223,3 +223,218 @@ class SeriesTimeScheme(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     system = relationship("SeriesSystem", back_populates="time_schemes")
+
+
+class ExperimentCondition(Base):
+    __tablename__ = "experiment_conditions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    condition_type = Column(String(50), nullable=False)
+    temperature = Column(Float, nullable=True)
+    humidity = Column(Float, nullable=True)
+    pressure = Column(Float, nullable=True)
+    water_quality = Column(String(100), nullable=True)
+    measurement_method = Column(String(200), nullable=True)
+    instrument_accuracy = Column(Float, nullable=True)
+    operator = Column(String(100), nullable=True)
+    experiment_date = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    experiment_assocs = relationship("ExperimentConditionAssoc", back_populates="condition", cascade="all, delete-orphan")
+
+
+class ExperimentConditionAssoc(Base):
+    __tablename__ = "experiment_condition_assocs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    experiment_id = Column(Integer, ForeignKey("experiments.id"), nullable=False)
+    condition_id = Column(Integer, ForeignKey("experiment_conditions.id"), nullable=False)
+    weight = Column(Float, nullable=False, default=1.0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    experiment = relationship("Experiment")
+    condition = relationship("ExperimentCondition", back_populates="experiment_assocs")
+
+
+class MultiSourceCalibration(Base):
+    __tablename__ = "multi_source_calibrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    container_id = Column(Integer, ForeignKey("containers.id"), nullable=False)
+    system_id = Column(Integer, ForeignKey("series_systems.id"), nullable=True)
+    name = Column(String(200), nullable=False)
+    calibration_method = Column(String(50), nullable=False, default="weighted_average")
+    status = Column(String(20), nullable=False, default="pending")
+    is_locked = Column(Boolean, nullable=False, default=False)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    locked_by = Column(String(100), nullable=True)
+    final_scheme_id = Column(Integer, ForeignKey("multi_source_candidate_schemes.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    container = relationship("Container")
+    system = relationship("SeriesSystem")
+    experiment_assocs = relationship("MultiSourceExperimentAssoc", back_populates="calibration", cascade="all, delete-orphan")
+    fitting_results = relationship("MultiSourceFittingResult", back_populates="calibration", cascade="all, delete-orphan")
+    consistency_analysis = relationship("ConsistencyAnalysis", back_populates="calibration", uselist=False, cascade="all, delete-orphan")
+    candidate_schemes = relationship("MultiSourceCandidateScheme", back_populates="calibration", cascade="all, delete-orphan", foreign_keys="MultiSourceCandidateScheme.calibration_id")
+    final_scheme = relationship("MultiSourceCandidateScheme", foreign_keys=[final_scheme_id], post_update=True)
+    expert_reviews = relationship("ExpertReview", back_populates="calibration", cascade="all, delete-orphan")
+    scheme_eliminations = relationship("SchemeElimination", back_populates="calibration", cascade="all, delete-orphan")
+    version_records = relationship("SchemeVersionRecord", back_populates="calibration", cascade="all, delete-orphan")
+    review_reports = relationship("ReviewReport", back_populates="calibration", cascade="all, delete-orphan")
+
+
+class MultiSourceExperimentAssoc(Base):
+    __tablename__ = "multi_source_experiment_assocs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calibration_id = Column(Integer, ForeignKey("multi_source_calibrations.id"), nullable=False)
+    experiment_id = Column(Integer, ForeignKey("experiments.id"), nullable=False)
+    weight = Column(Float, nullable=False, default=1.0)
+    is_included = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    calibration = relationship("MultiSourceCalibration", back_populates="experiment_assocs")
+    experiment = relationship("Experiment")
+
+
+class MultiSourceFittingResult(Base):
+    __tablename__ = "multi_source_fitting_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calibration_id = Column(Integer, ForeignKey("multi_source_calibrations.id"), nullable=False)
+    experiment_id = Column(Integer, ForeignKey("experiments.id"), nullable=False)
+    calibrated_orifice_diameter = Column(Float, nullable=False)
+    calibrated_discharge_coefficient = Column(Float, nullable=False)
+    calibrated_shape_params = Column(Text, nullable=True)
+    rmse = Column(Float, nullable=False)
+    mae = Column(Float, nullable=False)
+    r_squared = Column(Float, nullable=False)
+    fitting_curve = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    calibration = relationship("MultiSourceCalibration", back_populates="fitting_results")
+    experiment = relationship("Experiment")
+
+
+class ConsistencyAnalysis(Base):
+    __tablename__ = "consistency_analyses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calibration_id = Column(Integer, ForeignKey("multi_source_calibrations.id"), nullable=False)
+    overall_consistency_score = Column(Float, nullable=False)
+    parameter_consistency = Column(JSON, nullable=False)
+    metric_consistency = Column(JSON, nullable=False)
+    outlier_experiments = Column(JSON, nullable=True)
+    analysis_details = Column(JSON, nullable=True)
+    conclusion = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    calibration = relationship("MultiSourceCalibration", back_populates="consistency_analysis")
+
+
+class MultiSourceCandidateScheme(Base):
+    __tablename__ = "multi_source_candidate_schemes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calibration_id = Column(Integer, ForeignKey("multi_source_calibrations.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    scale_count = Column(Integer, nullable=False)
+    time_interval = Column(Float, nullable=False)
+    error_threshold = Column(Float, nullable=False)
+    combined_orifice_diameter = Column(Float, nullable=False)
+    combined_discharge_coefficient = Column(Float, nullable=False)
+    avg_error = Column(Float, nullable=False)
+    max_error = Column(Float, nullable=False)
+    exceeds_count = Column(Integer, nullable=False)
+    overall_score = Column(Float, nullable=False)
+    rank = Column(Integer, nullable=False)
+    marks_data = Column(JSON, nullable=False)
+    is_eliminated = Column(Boolean, nullable=False, default=False)
+    elimination_reason = Column(Text, nullable=True)
+    is_final = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    calibration = relationship("MultiSourceCalibration", back_populates="candidate_schemes", foreign_keys=[calibration_id])
+    expert_scores = relationship("ExpertScore", back_populates="candidate_scheme", cascade="all, delete-orphan")
+
+
+class ExpertScore(Base):
+    __tablename__ = "expert_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_scheme_id = Column(Integer, ForeignKey("multi_source_candidate_schemes.id"), nullable=False)
+    expert_name = Column(String(100), nullable=False)
+    accuracy_score = Column(Float, nullable=False)
+    feasibility_score = Column(Float, nullable=False)
+    historical_consistency_score = Column(Float, nullable=False)
+    overall_score = Column(Float, nullable=False)
+    comments = Column(Text, nullable=True)
+    scored_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    candidate_scheme = relationship("MultiSourceCandidateScheme", back_populates="expert_scores")
+
+
+class ExpertReview(Base):
+    __tablename__ = "expert_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calibration_id = Column(Integer, ForeignKey("multi_source_calibrations.id"), nullable=False)
+    expert_name = Column(String(100), nullable=False)
+    review_result = Column(String(20), nullable=False)
+    overall_comments = Column(Text, nullable=True)
+    recommendations = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    calibration = relationship("MultiSourceCalibration", back_populates="expert_reviews")
+
+
+class SchemeElimination(Base):
+    __tablename__ = "scheme_eliminations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calibration_id = Column(Integer, ForeignKey("multi_source_calibrations.id"), nullable=False)
+    candidate_scheme_id = Column(Integer, ForeignKey("multi_source_candidate_schemes.id"), nullable=False)
+    eliminated_by = Column(String(100), nullable=False)
+    elimination_reason = Column(Text, nullable=False)
+    elimination_criteria = Column(String(200), nullable=True)
+    eliminated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    calibration = relationship("MultiSourceCalibration", back_populates="scheme_eliminations")
+    candidate_scheme = relationship("MultiSourceCandidateScheme")
+
+
+class SchemeVersionRecord(Base):
+    __tablename__ = "scheme_version_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calibration_id = Column(Integer, ForeignKey("multi_source_calibrations.id"), nullable=False)
+    version_number = Column(Integer, nullable=False)
+    parent_version_id = Column(Integer, ForeignKey("scheme_version_records.id"), nullable=True)
+    candidate_scheme_id = Column(Integer, ForeignKey("multi_source_candidate_schemes.id"), nullable=True)
+    change_description = Column(Text, nullable=False)
+    changed_by = Column(String(100), nullable=False)
+    version_data = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    calibration = relationship("MultiSourceCalibration", back_populates="version_records")
+    candidate_scheme = relationship("MultiSourceCandidateScheme")
+    parent_version = relationship("SchemeVersionRecord", remote_side=[id])
+
+
+class ReviewReport(Base):
+    __tablename__ = "review_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calibration_id = Column(Integer, ForeignKey("multi_source_calibrations.id"), nullable=False)
+    report_type = Column(String(50), nullable=False)
+    report_format = Column(String(20), nullable=False, default="json")
+    report_content = Column(JSON, nullable=False)
+    generated_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    calibration = relationship("MultiSourceCalibration", back_populates="review_reports")

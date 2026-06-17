@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}新建多源校准 - {{ container.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>新建多源实验对比校准</h2>
+    <div>
+        <a href="/containers/{{ container.id }}/multi_calibrations" class="btn btn-secondary">返回列表</a>
+    </div>
+</div>
+
+<div class="card">
+    <h3>校准配置</h3>
+    <form id="multi-calibration-form">
+        <div class="form-group">
+            <label for="name">校准名称</label>
+            <input type="text" id="name" name="name" required placeholder="请输入校准名称">
+        </div>
+
+        <div class="form-group">
+            <label>选择实验数据（可多选，至少1组）</label>
+            {% if experiments %}
+            <div class="experiment-selection">
+                {% for exp in experiments %}
+                <div class="experiment-item">
+                    <label class="checkbox-label">
+                        <input type="checkbox" class="exp-checkbox" value="{{ exp.id }}" data-name="{{ exp.name }}">
+                        <strong>{{ exp.name }}</strong>
+                        <span class="muted">(数据点: {{ exp.data_points|length }})</span>
+                    </label>
+                    <div class="weight-input" style="display: none; margin-left: 24px; margin-top: 8px;">
+                        <label style="font-size: 14px;">权重 (0-10):</label>
+                        <input type="number" class="exp-weight" min="0.1" max="10" step="0.1" value="1.0" style="width: 100px; display: inline-block;">
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <p>该容器暂无实验数据，请先创建实验</p>
+                <a href="/containers/{{ container.id }}/experiments/new" class="btn btn-primary">新建实验</a>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="calibration_method">校准方法</label>
+            <select id="calibration_method" name="calibration_method" required>
+                <option value="weighted_average">加权平均（推荐，按权重综合）</option>
+                <option value="mean">算术平均</option>
+                <option value="median">中位数（抗异常值）</option>
+                <option value="robust_mean">稳健均值（截尾均值）</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="candidate_count">候选方案数量</label>
+                <input type="number" id="candidate_count" name="candidate_count" min="1" max="20" value="5">
+            </div>
+            <div class="form-group">
+                <label for="min_scale_count">最小刻度数</label>
+                <input type="number" id="min_scale_count" name="min_scale_count" min="1" value="10">
+            </div>
+            <div class="form-group">
+                <label for="max_scale_count">最大刻度数</label>
+                <input type="number" id="max_scale_count" name="max_scale_count" min="2" value="50">
+            </div>
+            <div class="form-group">
+                <label for="error_threshold">误差阈值（秒）</label>
+                <input type="number" id="error_threshold" name="error_threshold" min="0.1" step="0.1" value="5.0">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="notes">备注</label>
+            <textarea id="notes" name="notes" rows="3" placeholder="可选，添加备注信息"></textarea>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="submit-btn">创建并执行校准</button>
+            <a href="/containers/{{ container.id }}/multi_calibrations" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const containerId = {{ container.id }};
+
+document.querySelectorAll('.exp-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', function() {
+        const weightInput = this.closest('.experiment-item').querySelector('.weight-input');
+        weightInput.style.display = this.checked ? 'block' : 'none';
+    });
+});
+
+document.getElementById('multi-calibration-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const checkedExps = document.querySelectorAll('.exp-checkbox:checked');
+    if (checkedExps.length === 0) {
+        alert('请至少选择一组实验数据');
+        return;
+    }
+
+    const experiments = [];
+    checkedExps.forEach(cb => {
+        const weightInput = cb.closest('.experiment-item').querySelector('.exp-weight');
+        experiments.push({
+            experiment_id: parseInt(cb.value),
+            weight: parseFloat(weightInput.value) || 1.0,
+            is_included: true
+        });
+    });
+
+    const payload = {
+        name: document.getElementById('name').value,
+        container_id: containerId,
+        calibration_method: document.getElementById('calibration_method').value,
+        experiments: experiments,
+        candidate_count: parseInt(document.getElementById('candidate_count').value),
+        min_scale_count: parseInt(document.getElementById('min_scale_count').value),
+        max_scale_count: parseInt(document.getElementById('max_scale_count').value),
+        error_threshold: parseFloat(document.getElementById('error_threshold').value),
+        notes: document.getElementById('notes').value || null
+    };
+
+    const submitBtn = document.getElementById('submit-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = '创建中...';
+
+    try {
+        const resp = await fetch('/api/multi_calibrations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail ? (Array.isArray(err.detail) ? err.detail.join('; ') : JSON.stringify(err.detail)) : '创建失败');
+        }
+
+        const calibration = await resp.json();
+
+        submitBtn.textContent = '执行联合校准中...';
+        const runResp = await fetch(`/api/multi_calibrations/${calibration.id}/run`, { method: 'POST' });
+        if (!runResp.ok) {
+            const err = await runResp.json();
+            throw new Error(err.detail || '联合校准执行失败');
+        }
+
+        submitBtn.textContent = '生成候选方案中...';
+        const genResp = await fetch(`/api/multi_calibrations/${calibration.id}/generate_candidates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!genResp.ok) {
+            const err = await genResp.json();
+            throw new Error(err.detail || '候选方案生成失败');
+        }
+
+        alert('多源校准创建成功！');
+        window.location.href = `/containers/${containerId}/multi_calibrations/${calibration.id}`;
+
+    } catch (err) {
+        alert('操作失败：' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '创建并执行校准';
+    }
+});
+</script>
+{% endblock %}
