@@ -89,78 +89,22 @@
 {% block scripts %}
 <script>
 async function loadSchemePlots() {
-    const [marksResp, curveResp] = await Promise.all([
-        fetch(`/api/schemes/{{ scheme.id }}/marks`),
-        fetch(`/api/containers/{{ container.id }}/water_curve`)
+    const [marksData, curveData] = await Promise.all([
+        Clepsydra.fetchJSON(`/api/schemes/{{ scheme.id }}/marks`),
+        Clepsydra.fetchJSON(`/api/containers/{{ container.id }}/water_curve`)
     ]);
-    const marksData = await marksResp.json();
-    const curveData = await curveResp.json();
-
     const marks = marksData.marks;
-
     const traces1 = [
-        {
-            x: curveData.times,
-            y: curveData.levels,
-            mode: 'lines',
-            name: '水位曲线',
-            line: { color: '#3182ce', width: 2 }
-        },
-        {
-            x: marks.map(m => m.estimated_time),
-            y: marks.map(m => m.water_level),
-            mode: 'markers',
-            name: '刻度位置',
-            marker: {
-                color: marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#38a169'),
-                size: 8,
-                symbol: 'diamond'
-            }
-        }
+        { x: curveData.times, y: curveData.levels, mode: 'lines', name: '水位曲线', line: { color: '#3182ce', width: 2 } },
+        { x: marks.map(m => m.estimated_time), y: marks.map(m => m.water_level), mode: 'markers', name: '刻度位置', marker: { color: marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#38a169'), size: 8, symbol: 'diamond' } }
     ];
+    Clepsydra.plot('schemePlot', traces1, '刻度位置在水位曲线上的分布', '时间 (秒)', '水位');
 
-    const layout1 = {
-        title: '刻度位置在水位曲线上的分布',
-        xaxis: { title: '时间 (秒)', gridcolor: '#e2e8f0' },
-        yaxis: { title: '水位', gridcolor: '#e2e8f0' },
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
-        legend: { x: 0, y: 1 },
-        margin: { t: 50, r: 30, b: 50, l: 50 }
-    };
-
-    Plotly.newPlot('schemePlot', traces1, layout1, { responsive: true });
-
-    const errorColors = marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#3182ce');
-
-    const traces2 = [{
-        x: marks.map(m => m.scale_index),
-        y: marks.map(m => m.error),
-        type: 'bar',
-        marker: { color: errorColors },
-        name: '误差'
-    }];
-
-    const layout2 = {
-        title: '各刻度误差分布 (阈值: {{ scheme.error_threshold }}秒)',
-        xaxis: { title: '刻度序号', gridcolor: '#e2e8f0' },
-        yaxis: { title: '误差 (秒)', gridcolor: '#e2e8f0' },
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
-        shapes: [{
-            type: 'line',
-            x0: 0,
-            x1: marks.length,
-            y0: {{ scheme.error_threshold }},
-            y1: {{ scheme.error_threshold }},
-            line: { color: '#e53e3e', width: 2, dash: 'dash' }
-        }],
-        margin: { t: 50, r: 30, b: 50, l: 50 }
-    };
-
-    Plotly.newPlot('errorPlot', traces2, layout2, { responsive: true });
+    const traces2 = [{ x: marks.map(m => m.scale_index), y: marks.map(m => m.error), type: 'bar', marker: { color: marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#3182ce') }, name: '误差' }];
+    Clepsydra.plot('errorPlot', traces2, '各刻度误差分布 (阈值: {{ scheme.error_threshold }}秒)', '刻度序号', '误差 (秒)', {
+        shapes: [{ type: 'line', x0: 0, x1: marks.length, y0: {{ scheme.error_threshold }}, y1: {{ scheme.error_threshold }}, line: { color: '#e53e3e', width: 2, dash: 'dash' } }]
+    });
 }
-
 loadSchemePlots();
 </script>
 {% endblock %}

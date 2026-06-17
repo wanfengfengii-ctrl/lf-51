@@ -47,11 +47,9 @@ async function loadCompareData() {
         fetch(`/api/schemes/{{ s.id }}/marks`),
         {% endfor %}
     ]);
-
     const summary = await summaryResp.json();
     const curveData = await curveResp.json();
     const schemesMarks = await Promise.all(schemesResp.map(r => r.json()));
-
     renderSummaryTable(summary.schemes);
     renderCurveCompare(curveData, summary.schemes, schemesMarks);
     renderErrorCompare(summary.schemes, schemesMarks);
@@ -59,136 +57,42 @@ async function loadCompareData() {
 }
 
 function renderSummaryTable(schemes) {
-    let html = '<table><thead><tr>' +
-        '<th>方案名称</th>' +
-        '<th>刻度数</th>' +
-        '<th>间隔(秒)</th>' +
-        '<th>阈值(秒)</th>' +
-        '<th>平均误差(秒)</th>' +
-        '<th>最大误差(秒)</th>' +
-        '<th>超阈值数</th>' +
-        '<th>状态</th>' +
-        '<th>操作</th>' +
-        '</tr></thead><tbody>';
-
+    let html = '<table><thead><tr><th>方案名称</th><th>刻度数</th><th>间隔(秒)</th><th>阈值(秒)</th><th>平均误差(秒)</th><th>最大误差(秒)</th><th>超阈值数</th><th>状态</th><th>操作</th></tr></thead><tbody>';
     schemes.forEach((s, idx) => {
         const color = colorPalette[idx % colorPalette.length];
-        html += `<tr>
-            <td><span style="display:inline-block;width:12px;height:12px;background:${color};border-radius:50%;margin-right:8px;"></span><strong>${s.scheme_name}</strong></td>
-            <td>${s.scale_count}</td>
-            <td>${s.time_interval}</td>
-            <td>${s.error_threshold}</td>
-            <td>${s.avg_error}</td>
-            <td>${s.max_error}</td>
-            <td>${s.exceeds_count}</td>
-            <td>${s.needs_review ? '<span class="badge badge-warning">待复核</span>' : '<span class="badge badge-success">已确认</span>'}</td>
-            <td><a href="/containers/{{ container.id }}/schemes/${s.scheme_id}" class="btn btn-sm btn-primary">查看</a></td>
-        </tr>`;
+        html += `<tr><td><span style="display:inline-block;width:12px;height:12px;background:${color};border-radius:50%;margin-right:8px;"></span><strong>${s.scheme_name}</strong></td><td>${s.scale_count}</td><td>${s.time_interval}</td><td>${s.error_threshold}</td><td>${s.avg_error}</td><td>${s.max_error}</td><td>${s.exceeds_count}</td><td>${s.needs_review ? '<span class="badge badge-warning">待复核</span>' : '<span class="badge badge-success">已确认</span>'}</td><td><a href="/containers/{{ container.id }}/schemes/${s.scheme_id}" class="btn btn-sm btn-primary">查看</a></td></tr>`;
     });
-
     html += '</tbody></table>';
     document.getElementById('compareTableContainer').innerHTML = html;
 }
 
 function renderCurveCompare(curveData, schemes, schemesMarks) {
-    const traces = [{
-        x: curveData.times,
-        y: curveData.levels,
-        mode: 'lines',
-        name: '理论水位曲线',
-        line: { color: '#718096', width: 2, dash: 'dash' }
-    }];
-
+    const traces = [{ x: curveData.times, y: curveData.levels, mode: 'lines', name: '理论水位曲线', line: { color: '#718096', width: 2, dash: 'dash' } }];
     schemes.forEach((s, idx) => {
         const marks = schemesMarks[idx].marks;
         const color = colorPalette[idx % colorPalette.length];
-        traces.push({
-            x: marks.map(m => m.estimated_time),
-            y: marks.map(m => m.water_level),
-            mode: 'markers',
-            name: s.scheme_name,
-            marker: { color: color, size: 7, symbol: 'diamond' }
-        });
+        traces.push({ x: marks.map(m => m.estimated_time), y: marks.map(m => m.water_level), mode: 'markers', name: s.scheme_name, marker: { color: color, size: 7, symbol: 'diamond' } });
     });
-
-    const layout = {
-        title: '各方案刻度位置分布',
-        xaxis: { title: '时间 (秒)', gridcolor: '#e2e8f0' },
-        yaxis: { title: '水位', gridcolor: '#e2e8f0' },
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
-        legend: { x: 0, y: 1 },
-        margin: { t: 50, r: 30, b: 50, l: 50 }
-    };
-
-    Plotly.newPlot('compareCurvePlot', traces, layout, { responsive: true });
+    Clepsydra.plot('compareCurvePlot', traces, '各方案刻度位置分布', '时间 (秒)', '水位');
 }
 
 function renderErrorCompare(schemes, schemesMarks) {
     const traces = [];
-
     schemes.forEach((s, idx) => {
         const marks = schemesMarks[idx].marks;
         const color = colorPalette[idx % colorPalette.length];
-        traces.push({
-            x: marks.map(m => m.scale_index),
-            y: marks.map(m => m.error),
-            mode: 'lines+markers',
-            name: s.scheme_name,
-            line: { color: color, width: 2 },
-            marker: { size: 5 }
-        });
+        traces.push({ x: marks.map(m => m.scale_index), y: marks.map(m => m.error), mode: 'lines+markers', name: s.scheme_name, line: { color: color, width: 2 }, marker: { size: 5 } });
     });
-
-    const layout = {
-        title: '各方案误差随刻度变化曲线',
-        xaxis: { title: '刻度序号', gridcolor: '#e2e8f0' },
-        yaxis: { title: '误差 (秒)', gridcolor: '#e2e8f0' },
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
-        legend: { x: 0, y: 1 },
-        margin: { t: 50, r: 30, b: 50, l: 50 }
-    };
-
-    Plotly.newPlot('compareErrorPlot', traces, layout, { responsive: true });
+    Clepsydra.plot('compareErrorPlot', traces, '各方案误差随刻度变化曲线', '刻度序号', '误差 (秒)');
 }
 
 function renderStatsCompare(schemes) {
     const colors = schemes.map((_, idx) => colorPalette[idx % colorPalette.length]);
-
     const traces = [
-        {
-            x: schemes.map(s => s.scheme_name),
-            y: schemes.map(s => s.avg_error),
-            type: 'bar',
-            name: '平均误差',
-            marker: { color: colors },
-            text: schemes.map(s => s.avg_error + 's'),
-            textposition: 'auto'
-        },
-        {
-            x: schemes.map(s => s.scheme_name),
-            y: schemes.map(s => s.max_error),
-            type: 'bar',
-            name: '最大误差',
-            marker: { color: colors.map(c => c + '99') },
-            text: schemes.map(s => s.max_error + 's'),
-            textposition: 'auto'
-        }
+        { x: schemes.map(s => s.scheme_name), y: schemes.map(s => s.avg_error), type: 'bar', name: '平均误差', marker: { color: colors }, text: schemes.map(s => s.avg_error + 's'), textposition: 'auto' },
+        { x: schemes.map(s => s.scheme_name), y: schemes.map(s => s.max_error), type: 'bar', name: '最大误差', marker: { color: colors.map(c => c + '99') }, text: schemes.map(s => s.max_error + 's'), textposition: 'auto' }
     ];
-
-    const layout = {
-        title: '平均误差与最大误差对比',
-        xaxis: { title: '方案名称', gridcolor: '#e2e8f0' },
-        yaxis: { title: '误差 (秒)', gridcolor: '#e2e8f0' },
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
-        barmode: 'group',
-        legend: { x: 0, y: 1 },
-        margin: { t: 50, r: 30, b: 50, l: 50 }
-    };
-
-    Plotly.newPlot('compareStatsPlot', traces, layout, { responsive: true });
+    Clepsydra.plot('compareStatsPlot', traces, '平均误差与最大误差对比', '方案名称', '误差 (秒)', { barmode: 'group' });
 }
 
 loadCompareData();

@@ -180,30 +180,10 @@
 {% block scripts %}
 <script>
 async function loadWaterCurve() {
-    const response = await fetch(`/api/containers/{{ container.id }}/water_curve`);
-    const data = await response.json();
-
-    const trace = {
-        x: data.times,
-        y: data.levels,
-        mode: 'lines',
-        name: '理论水位',
-        line: { color: '#3182ce', width: 3 }
-    };
-
-    const layout = {
-        title: '水位-时间曲线',
-        xaxis: { title: '时间 (秒)', gridcolor: '#e2e8f0' },
-        yaxis: { title: '水位', gridcolor: '#e2e8f0' },
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
-        margin: { t: 50, r: 30, b: 50, l: 50 },
-        hovermode: 'x unified'
-    };
-
-    Plotly.newPlot('waterCurvePlot', [trace], layout, { responsive: true });
+    const data = await Clepsydra.fetchJSON(`/api/containers/{{ container.id }}/water_curve`);
+    const trace = { x: data.times, y: data.levels, mode: 'lines', name: '理论水位', line: { color: '#3182ce', width: 3 } };
+    Clepsydra.plot('waterCurvePlot', [trace], '水位-时间曲线', '时间 (秒)', '水位', { hovermode: 'x unified' });
 }
-
 loadWaterCurve();
 </script>
 {% endblock %}

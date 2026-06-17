@@ -338,111 +338,31 @@ function switchTab(tabName) {
 }
 
 async function loadFittingPlot() {
-    const resp = await fetch(`/api/calibrations/${calibrationId}/fitting_result`);
-    const data = await resp.json();
-
-    const trace1 = {
-        x: data.experiment_curve.map(p => p.time),
-        y: data.experiment_curve.map(p => p.level),
-        mode: 'markers',
-        name: '实验数据',
-        marker: { color: '#e53e3e', size: 8 }
-    };
-
-    const trace2 = {
-        x: data.fitted_curve.map(p => p.time),
-        y: data.fitted_curve.map(p => p.level),
-        mode: 'lines',
-        name: '拟合曲线',
-        line: { color: '#3182ce', width: 2 }
-    };
-
-    const layout = {
-        title: '水位-时间曲线对比',
-        xaxis: { title: '时间 (秒)' },
-        yaxis: { title: '水位 (cm)' },
-        legend: { orientation: 'h', y: -0.2 },
-        margin: { l: 50, r: 20, t: 50, b: 50 }
-    };
-
-    Plotly.newPlot('fitting-plot', [trace1, trace2], layout, { responsive: true });
+    const data = await Clepsydra.fetchJSON(`/api/calibrations/${calibrationId}/fitting_result`);
+    const trace1 = { x: data.experiment_curve.map(p => p.time), y: data.experiment_curve.map(p => p.level), mode: 'markers', name: '实验数据', marker: { color: '#e53e3e', size: 8 } };
+    const trace2 = { x: data.fitted_curve.map(p => p.time), y: data.fitted_curve.map(p => p.level), mode: 'lines', name: '拟合曲线', line: { color: '#3182ce', width: 2 } };
+    Clepsydra.plot('fitting-plot', [trace1, trace2], '水位-时间曲线对比', '时间 (秒)', '水位 (cm)', { legend: { orientation: 'h', y: -0.2 } });
 }
 
 async function loadComparisonPlot() {
-    const [resp1, resp2] = await Promise.all([
-        fetch(`/api/calibrations/${calibrationId}/error_comparison`),
-        fetch(`/api/candidates/${recommendedSchemeId}/marks`)
+    const [compData, marksData] = await Promise.all([
+        Clepsydra.fetchJSON(`/api/calibrations/${calibrationId}/error_comparison`),
+        Clepsydra.fetchJSON(`/api/candidates/${recommendedSchemeId}/marks`)
     ]);
-    const compData = await resp1.json();
-    const marksData = await resp2.json();
-
     const schemes = compData.comparison;
-
-    const trace1 = {
-        x: schemes.map(s => s.name),
-        y: schemes.map(s => s.avg_error),
-        type: 'bar',
-        name: '平均误差',
-        marker: { color: '#3182ce' }
-    };
-
-    const trace2 = {
-        x: schemes.map(s => s.name),
-        y: schemes.map(s => s.max_error),
-        type: 'bar',
-        name: '最大误差',
-        marker: { color: '#e53e3e' }
-    };
-
-    const layout1 = {
-        title: '候选方案误差对比',
-        xaxis: { title: '方案名称' },
-        yaxis: { title: '误差 (秒)' },
-        barmode: 'group',
-        legend: { orientation: 'h', y: -0.2 },
-        margin: { l: 50, r: 20, t: 50, b: 80 }
-    };
-
-    Plotly.newPlot('comparison-plot', [trace1, trace2], layout1, { responsive: true });
+    const trace1 = { x: schemes.map(s => s.name), y: schemes.map(s => s.avg_error), type: 'bar', name: '平均误差', marker: { color: '#3182ce' } };
+    const trace2 = { x: schemes.map(s => s.name), y: schemes.map(s => s.max_error), type: 'bar', name: '最大误差', marker: { color: '#e53e3e' } };
+    Clepsydra.plot('comparison-plot', [trace1, trace2], '候选方案误差对比', '方案名称', '误差 (秒)', { barmode: 'group', legend: { orientation: 'h', y: -0.2 } });
 
     const marks = marksData.marks;
     const threshold = marksData.error_threshold;
-
-    const trace3 = {
-        x: marks.map(m => m.scale_index),
-        y: marks.map(m => m.error),
-        type: 'scatter',
-        mode: 'lines+markers',
-        name: '刻度误差',
-        line: { color: '#3182ce' },
-        marker: {
-            color: marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#38a169'),
-            size: 8
-        }
-    };
-
-    const trace4 = {
-        x: marks.map(m => m.scale_index),
-        y: marks.map(() => threshold),
-        type: 'line',
-        name: '误差阈值',
-        line: { color: '#d69e2e', dash: 'dash' }
-    };
-
-    const layout2 = {
-        title: '推荐方案各刻度误差分布',
-        xaxis: { title: '刻度序号' },
-        yaxis: { title: '误差 (秒)' },
-        legend: { orientation: 'h', y: -0.2 },
-        margin: { l: 50, r: 20, t: 50, b: 50 }
-    };
-
-    Plotly.newPlot('marks-plot', [trace3, trace4], layout2, { responsive: true });
+    const trace3 = { x: marks.map(m => m.scale_index), y: marks.map(m => m.error), type: 'scatter', mode: 'lines+markers', name: '刻度误差', line: { color: '#3182ce' }, marker: { color: marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#38a169'), size: 8 } };
+    const trace4 = { x: marks.map(m => m.scale_index), y: marks.map(() => threshold), type: 'line', name: '误差阈值', line: { color: '#d69e2e', dash: 'dash' } };
+    Clepsydra.plot('marks-plot', [trace3, trace4], '推荐方案各刻度误差分布', '刻度序号', '误差 (秒)', { legend: { orientation: 'h', y: -0.2 } });
 }
 
 async function loadWarnings() {
-    const resp = await fetch(`/api/calibrations/${calibrationId}/warning_segments`);
-    const data = await resp.json();
+    const data = await Clepsydra.fetchJSON(`/api/calibrations/${calibrationId}/warning_segments`);
     const warnings = data.warning_segments;
 
     const container = document.getElementById('warnings-list');

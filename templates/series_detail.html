@@ -410,89 +410,29 @@ function switchDynasty() {
 document.addEventListener('DOMContentLoaded', function() {
     updateExportLinks();
 
-    fetch('/api/series/schemes/' + schemeId + '/data')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var stageColors = ['#3182ce', '#38a169', '#d69e2e', '#e53e3e', '#805ad5', '#dd6b20', '#319795', '#b83280'];
+    Clepsydra.fetchJSON('/api/series/schemes/' + schemeId + '/data').then(function(data) {
+        var stageColors = ['#3182ce', '#38a169', '#d69e2e', '#e53e3e', '#805ad5', '#dd6b20', '#319795', '#b83280'];
+        var stageTraces = [];
+        if (data.stage_curves && data.stage_curves.length > 0) {
+            data.stage_curves.forEach(function(curve, idx) {
+                stageTraces.push({ x: curve.map(function(p) { return p.time / 3600; }), y: curve.map(function(p) { return p.level; }), mode: 'lines', name: '第' + (idx + 1) + '级水位', line: { color: stageColors[idx % stageColors.length], width: 2 } });
+            });
+        }
+        Clepsydra.plot('stageCurvesPlot', stageTraces, '各级漏壶水位随时间变化', '时间（小时）', '水位', { legend: { orientation: 'h', y: -0.15 } });
 
-            var stageTraces = [];
-            if (data.stage_curves && data.stage_curves.length > 0) {
-                data.stage_curves.forEach(function(curve, idx) {
-                    stageTraces.push({
-                        x: curve.map(function(p) { return p.time / 3600; }),
-                        y: curve.map(function(p) { return p.level; }),
-                        mode: 'lines',
-                        name: '第' + (idx + 1) + '级水位',
-                        line: { color: stageColors[idx % stageColors.length], width: 2 }
-                    });
-                });
-            }
+        {% if system.enable_temp_effect %}
+        if (data.temp_curve && data.temp_curve.length > 0) {
+            var tempTrace = { x: data.temp_curve.map(function(p) { return p.time / 3600; }), y: data.temp_curve.map(function(p) { return p.temp; }), mode: 'lines', name: '温度', line: { color: '#e53e3e', width: 2 }, fill: 'tozeroy', fillcolor: 'rgba(229, 62, 62, 0.1)' };
+            Clepsydra.plot('tempCurvePlot', [tempTrace], '昼夜温度变化', '时间（小时）', '温度 (℃)');
+        }
+        {% endif %}
 
-            Plotly.newPlot('stageCurvesPlot', stageTraces, {
-                title: '各级漏壶水位随时间变化',
-                xaxis: { title: '时间（小时）', gridcolor: '#e2e8f0' },
-                yaxis: { title: '水位', gridcolor: '#e2e8f0' },
-                margin: { t: 50, r: 30, l: 60, b: 50 },
-                legend: { orientation: 'h', y: -0.15 },
-                plot_bgcolor: 'white',
-                paper_bgcolor: 'white'
-            }, { responsive: true });
-
-            {% if system.enable_temp_effect %}
-            if (data.temp_curve && data.temp_curve.length > 0) {
-                var tempTrace = {
-                    x: data.temp_curve.map(function(p) { return p.time / 3600; }),
-                    y: data.temp_curve.map(function(p) { return p.temp; }),
-                    mode: 'lines',
-                    name: '温度',
-                    line: { color: '#e53e3e', width: 2 },
-                    fill: 'tozeroy',
-                    fillcolor: 'rgba(229, 62, 62, 0.1)'
-                };
-                Plotly.newPlot('tempCurvePlot', [tempTrace], {
-                    title: '昼夜温度变化',
-                    xaxis: { title: '时间（小时）', gridcolor: '#e2e8f0' },
-                    yaxis: { title: '温度 (℃)', gridcolor: '#e2e8f0' },
-                    margin: { t: 40, r: 30, l: 60, b: 40 },
-                    plot_bgcolor: 'white',
-                    paper_bgcolor: 'white'
-                }, { responsive: true });
-            }
-            {% endif %}
-
-            if (data.error_curve && data.error_curve.length > 0) {
-                var errorTrace = {
-                    x: data.error_curve.map(function(p) { return p.time / 3600; }),
-                    y: data.error_curve.map(function(p) { return p.error; }),
-                    mode: 'lines+markers',
-                    name: '累计误差',
-                    line: { color: '#d69e2e', width: 2 },
-                    marker: { size: 4 }
-                };
-                var thresholdTrace = {
-                    x: [0, data.error_curve[data.error_curve.length - 1].time / 3600],
-                    y: [data.error_threshold, data.error_threshold],
-                    mode: 'lines',
-                    name: '正阈值',
-                    line: { color: '#e53e3e', width: 1, dash: 'dash' }
-                };
-                var thresholdTraceNeg = {
-                    x: [0, data.error_curve[data.error_curve.length - 1].time / 3600],
-                    y: [-data.error_threshold, -data.error_threshold],
-                    mode: 'lines',
-                    name: '负阈值',
-                    line: { color: '#e53e3e', width: 1, dash: 'dash' }
-                };
-                Plotly.newPlot('errorCurvePlot', [errorTrace, thresholdTrace, thresholdTraceNeg], {
-                    title: '累计计时误差曲线',
-                    xaxis: { title: '时间（小时）', gridcolor: '#e2e8f0' },
-                    yaxis: { title: '误差（秒）', gridcolor: '#e2e8f0' },
-                    margin: { t: 40, r: 30, l: 60, b: 50 },
-                    legend: { orientation: 'h', y: -0.15 },
-                    plot_bgcolor: 'white',
-                    paper_bgcolor: 'white'
-                }, { responsive: true });
-            }
+        if (data.error_curve && data.error_curve.length > 0) {
+            var errorTrace = { x: data.error_curve.map(function(p) { return p.time / 3600; }), y: data.error_curve.map(function(p) { return p.error; }), mode: 'lines+markers', name: '累计误差', line: { color: '#d69e2e', width: 2 }, marker: { size: 4 } };
+            var thresholdTrace = { x: [0, data.error_curve[data.error_curve.length - 1].time / 3600], y: [data.error_threshold, data.error_threshold], mode: 'lines', name: '正阈值', line: { color: '#e53e3e', width: 1, dash: 'dash' } };
+            var thresholdTraceNeg = { x: [0, data.error_curve[data.error_curve.length - 1].time / 3600], y: [-data.error_threshold, -data.error_threshold], mode: 'lines', name: '负阈值', line: { color: '#e53e3e', width: 1, dash: 'dash' } };
+            Clepsydra.plot('errorCurvePlot', [errorTrace, thresholdTrace, thresholdTraceNeg], '累计计时误差曲线', '时间（小时）', '误差（秒）', { legend: { orientation: 'h', y: -0.15 } });
+        }
         });
 });
 {% endif %}
