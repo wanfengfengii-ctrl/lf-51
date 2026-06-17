@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 
@@ -26,7 +26,8 @@ class ContainerCreate(ContainerBase):
 
 
 class ContainerUpdate(ContainerBase):
-    pass
+    change_reason: Optional[str] = None
+    changed_by: Optional[str] = None
 
 
 class ContainerResponse(ContainerBase):
@@ -103,3 +104,117 @@ class ScaleSchemeResponse(ScaleSchemeBase):
 
     class Config:
         from_attributes = True
+
+
+class CalibrationBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    experiment_id: int = Field(..., gt=0)
+    notes: Optional[str] = None
+
+
+class CalibrationCreate(CalibrationBase):
+    candidate_count: int = Field(5, gt=0, le=20)
+    min_scale_count: int = Field(10, gt=0)
+    max_scale_count: int = Field(50, gt=0)
+    error_threshold: float = Field(5.0, gt=0)
+
+
+class CalibrationResponse(CalibrationBase):
+    id: int
+    container_id: int
+    calibrated_orifice_diameter: float
+    calibrated_discharge_coefficient: float
+    calibrated_shape_params: Optional[str] = None
+    rmse: float
+    mae: float
+    r_squared: float
+    status: str
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CandidateSchemeResponse(BaseModel):
+    id: int
+    calibration_id: int
+    name: str
+    scale_count: int
+    time_interval: float
+    error_threshold: float
+    avg_error: float
+    max_error: float
+    exceeds_count: int
+    rank: int
+    is_recommended: bool
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ParameterVersionResponse(BaseModel):
+    id: int
+    container_id: int
+    version_number: int
+    old_shape: Optional[str] = None
+    new_shape: Optional[str] = None
+    old_capacity: Optional[float] = None
+    new_capacity: Optional[float] = None
+    old_orifice_diameter: Optional[float] = None
+    new_orifice_diameter: Optional[float] = None
+    old_initial_water_level: Optional[float] = None
+    new_initial_water_level: Optional[float] = None
+    old_shape_params: Optional[str] = None
+    new_shape_params: Optional[str] = None
+    change_reason: Optional[str] = None
+    changed_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReviewRecordCreate(BaseModel):
+    reviewer: str = Field(..., min_length=1, max_length=100)
+    review_result: str = Field(..., pattern="^(approved|rejected|needs_revision)$")
+    comments: Optional[str] = None
+
+
+class ReviewRecordResponse(BaseModel):
+    id: int
+    calibration_id: int
+    reviewer: str
+    review_result: str
+    comments: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class FittingResultResponse(BaseModel):
+    experiment_curve: List[Dict[str, float]]
+    fitted_curve: List[Dict[str, float]]
+    calibrated_params: Dict[str, Any]
+    metrics: Dict[str, float]
+
+
+class WarningSegmentResponse(BaseModel):
+    scale_index: int
+    start_time: float
+    end_time: float
+    error: float
+    threshold: float
+    severity: str
+
+
+class RecommendationResponse(BaseModel):
+    calibration: CalibrationResponse
+    recommended_scheme: CandidateSchemeResponse
+    alternative_schemes: List[CandidateSchemeResponse]
+    fitting_result: FittingResultResponse
+    warning_segments: List[WarningSegmentResponse]
+    parameter_versions: List[ParameterVersionResponse]
+    review_records: List[ReviewRecordResponse]
+    error_comparison: List[Dict[str, Any]]

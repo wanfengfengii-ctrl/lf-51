@@ -1,0 +1,515 @@
+{% extends "base.html" %}
+
+{% block title %}推荐方案 - {{ calibration.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>刻度复原推荐方案</h2>
+    <div>
+        <a href="/containers/{{ container.id }}" class="btn btn-secondary">返回容器</a>
+        <a href="/calibrations/{{ calibration.id }}/export" class="btn btn-success">导出JSON</a>
+        <a href="/calibrations/{{ calibration.id }}/export/csv" class="btn btn-success">导出CSV</a>
+    </div>
+</div>
+
+<div class="stat-cards">
+    <div class="stat-card success">
+        <div class="stat-value">{{ "%.4f"|format(calibration.r_squared) }}</div>
+        <div class="stat-label">拟合优度 R²</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ "%.4f"|format(calibration.rmse) }}</div>
+        <div class="stat-label">均方根误差 RMSE</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ "%.4f"|format(calibration.mae) }}</div>
+        <div class="stat-label">平均绝对误差 MAE</div>
+    </div>
+    <div class="stat-card {% if recommended_scheme.exceeds_count > 0 %}warning{% endif %}">
+        <div class="stat-value">{{ recommended_scheme.exceeds_count }}</div>
+        <div class="stat-label">超阈值刻度段</div>
+    </div>
+</div>
+
+<div class="tabs">
+    <a href="#tab-fitting" class="tab active" onclick="switchTab('fitting')">拟合曲线</a>
+    <a href="#tab-schemes" class="tab" onclick="switchTab('schemes')">候选方案对比</a>
+    <a href="#tab-warnings" class="tab" onclick="switchTab('warnings')">预警信息</a>
+    <a href="#tab-versions" class="tab" onclick="switchTab('versions')">参数版本</a>
+    <a href="#tab-review" class="tab" onclick="switchTab('review')">复核流程</a>
+</div>
+
+<div id="tab-fitting" class="tab-content">
+    <div class="card">
+        <h3>拟合曲线 vs 实验曲线</h3>
+        <div id="fitting-plot" class="plot-container"></div>
+    </div>
+
+    <div class="card">
+        <h3>校准后参数</h3>
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="label">校准后出水孔径</div>
+                <div class="value">{{ "%.6f"|format(calibration.calibrated_orifice_diameter) }}</div>
+            </div>
+            <div class="info-item">
+                <div class="label">原始出水孔径</div>
+                <div class="value">{{ "%.6f"|format(container.orifice_diameter) }}</div>
+            </div>
+            <div class="info-item">
+                <div class="label">校准后流量系数</div>
+                <div class="value">{{ "%.6f"|format(calibration.calibrated_discharge_coefficient) }}</div>
+            </div>
+            <div class="info-item">
+                <div class="label">原始流量系数</div>
+                <div class="value">0.600000</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="tab-schemes" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>候选方案误差对比</h3>
+        <div id="comparison-plot" class="plot-container"></div>
+    </div>
+
+    <div class="card">
+        <h3>推荐方案详情</h3>
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="label">推荐排名</div>
+                <div class="value">#{{ recommended_scheme.rank }}</div>
+            </div>
+            <div class="info-item">
+                <div class="label">刻度数量</div>
+                <div class="value">{{ recommended_scheme.scale_count }}</div>
+            </div>
+            <div class="info-item">
+                <div class="label">时间间隔</div>
+                <div class="value">{{ "%.2f"|format(recommended_scheme.time_interval) }}秒</div>
+            </div>
+            <div class="info-item">
+                <div class="label">平均误差</div>
+                <div class="value">{{ "%.4f"|format(recommended_scheme.avg_error) }}秒</div>
+            </div>
+            <div class="info-item">
+                <div class="label">最大误差</div>
+                <div class="value">{{ "%.4f"|format(recommended_scheme.max_error) }}秒</div>
+            </div>
+            <div class="info-item">
+                <div class="label">误差阈值</div>
+                <div class="value">{{ "%.2f"|format(recommended_scheme.error_threshold) }}秒</div>
+            </div>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <form method="post" action="/candidates/{{ recommended_scheme.id }}/apply" class="inline-form">
+                <button type="submit" class="btn btn-primary">应用此方案</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>所有候选方案</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>排名</th>
+                    <th>方案名称</th>
+                    <th>刻度数</th>
+                    <th>时间间隔</th>
+                    <th>平均误差</th>
+                    <th>最大误差</th>
+                    <th>超阈值数</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="highlight-success" style="background: #f0fff4;">
+                    <td><span class="badge badge-success">#{{ recommended_scheme.rank }}</span></td>
+                    <td>
+                        <strong>{{ recommended_scheme.name }}</strong>
+                        <span class="badge badge-success">推荐</span>
+                    </td>
+                    <td>{{ recommended_scheme.scale_count }}</td>
+                    <td>{{ "%.2f"|format(recommended_scheme.time_interval) }}s</td>
+                    <td>{{ "%.4f"|format(recommended_scheme.avg_error) }}s</td>
+                    <td>{{ "%.4f"|format(recommended_scheme.max_error) }}s</td>
+                    <td>
+                        {% if recommended_scheme.exceeds_count > 0 %}
+                        <span class="badge badge-danger">{{ recommended_scheme.exceeds_count }}</span>
+                        {% else %}
+                        <span class="badge badge-success">0</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="/candidates/{{ recommended_scheme.id }}/apply" class="inline-form">
+                            <button type="submit" class="btn btn-sm btn-primary">应用</button>
+                        </form>
+                    </td>
+                </tr>
+                {% for scheme in alternative_schemes %}
+                <tr>
+                    <td><span class="badge badge-info">#{{ scheme.rank }}</span></td>
+                    <td>{{ scheme.name }}</td>
+                    <td>{{ scheme.scale_count }}</td>
+                    <td>{{ "%.2f"|format(scheme.time_interval) }}s</td>
+                    <td>{{ "%.4f"|format(scheme.avg_error) }}s</td>
+                    <td>{{ "%.4f"|format(scheme.max_error) }}s</td>
+                    <td>
+                        {% if scheme.exceeds_count > 0 %}
+                        <span class="badge badge-danger">{{ scheme.exceeds_count }}</span>
+                        {% else %}
+                        <span class="badge badge-success">0</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="/candidates/{{ scheme.id }}/apply" class="inline-form">
+                            <button type="submit" class="btn btn-sm btn-secondary">应用</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>推荐方案刻度标记</h3>
+        <div id="marks-plot" class="plot-container"></div>
+    </div>
+</div>
+
+<div id="tab-warnings" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>超阈值刻度段预警</h3>
+        <div id="warnings-list"></div>
+    </div>
+</div>
+
+<div id="tab-versions" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>参数变更版本记录</h3>
+        {% if parameter_versions %}
+        <table>
+            <thead>
+                <tr>
+                    <th>版本</th>
+                    <th>变更参数</th>
+                    <th>原值 → 新值</th>
+                    <th>变更原因</th>
+                    <th>操作人</th>
+                    <th>时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in parameter_versions %}
+                <tr>
+                    <td>v{{ v.version_number }}</td>
+                    <td>
+                        {% if v.old_shape != v.new_shape %}形状<br>{% endif %}
+                        {% if v.old_capacity != v.new_capacity %}容量<br>{% endif %}
+                        {% if v.old_orifice_diameter != v.new_orifice_diameter %}出水孔径<br>{% endif %}
+                        {% if v.old_initial_water_level != v.new_initial_water_level %}初始水位<br>{% endif %}
+                        {% if v.old_shape_params != v.new_shape_params %}形状参数<br>{% endif %}
+                    </td>
+                    <td>
+                        {% if v.old_shape != v.new_shape %}{{ v.old_shape }} → {{ v.new_shape }}<br>{% endif %}
+                        {% if v.old_capacity != v.new_capacity %}{{ v.old_capacity }} → {{ v.new_capacity }}<br>{% endif %}
+                        {% if v.old_orifice_diameter != v.new_orifice_diameter %}{{ "%.4f"|format(v.old_orifice_diameter) }} → {{ "%.4f"|format(v.new_orifice_diameter) }}<br>{% endif %}
+                        {% if v.old_initial_water_level != v.new_initial_water_level %}{{ v.old_initial_water_level }} → {{ v.new_initial_water_level }}<br>{% endif %}
+                        {% if v.old_shape_params != v.new_shape_params %}{{ v.old_shape_params }} → {{ v.new_shape_params }}<br>{% endif %}
+                    </td>
+                    <td>{{ v.change_reason or '-' }}</td>
+                    <td>{{ v.changed_by or '-' }}</td>
+                    <td>{{ v.created_at.strftime('%Y-%m-%d %H:%M') if v.created_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无参数变更记录</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div id="tab-review" class="tab-content" style="display: none;">
+    <div class="card">
+        <h3>复核流程</h3>
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="label">当前状态</div>
+                <div class="value">
+                    {% if calibration.status == 'approved' %}
+                    <span class="badge badge-success">已通过</span>
+                    {% elif calibration.status == 'rejected' %}
+                    <span class="badge badge-danger">已拒绝</span>
+                    {% elif calibration.status == 'needs_revision' %}
+                    <span class="badge badge-warning">需修订</span>
+                    {% else %}
+                    <span class="badge badge-info">待复核</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <h4 style="margin-bottom: 15px;">提交复核</h4>
+            <form id="review-form">
+                <div class="form-group">
+                    <label for="reviewer">复核人</label>
+                    <input type="text" id="reviewer" name="reviewer" required placeholder="请输入复核人姓名">
+                </div>
+                <div class="form-group">
+                    <label for="review_result">复核结果</label>
+                    <select id="review_result" name="review_result" required>
+                        <option value="approved">通过</option>
+                        <option value="needs_revision">需修订</option>
+                        <option value="rejected">拒绝</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="comments">复核意见</label>
+                    <textarea id="comments" name="comments" rows="3" placeholder="请输入复核意见"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">提交复核</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>复核历史</h3>
+        {% if review_records %}
+        <table>
+            <thead>
+                <tr>
+                    <th>复核人</th>
+                    <th>结果</th>
+                    <th>意见</th>
+                    <th>时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in review_records %}
+                <tr>
+                    <td>{{ r.reviewer }}</td>
+                    <td>
+                        {% if r.review_result == 'approved' %}
+                        <span class="badge badge-success">通过</span>
+                        {% elif r.review_result == 'rejected' %}
+                        <span class="badge badge-danger">拒绝</span>
+                        {% else %}
+                        <span class="badge badge-warning">需修订</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.comments or '-' }}</td>
+                    <td>{{ r.reviewed_at.strftime('%Y-%m-%d %H:%M') if r.reviewed_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>暂无复核记录</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const calibrationId = {{ calibration.id }};
+const recommendedSchemeId = {{ recommended_scheme.id }};
+
+function switchTab(tabName) {
+    document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + tabName).style.display = 'block';
+    event.target.classList.add('active');
+    event.preventDefault();
+
+    if (tabName === 'fitting') loadFittingPlot();
+    if (tabName === 'schemes') loadComparisonPlot();
+    if (tabName === 'warnings') loadWarnings();
+}
+
+async function loadFittingPlot() {
+    const resp = await fetch(`/api/calibrations/${calibrationId}/fitting_result`);
+    const data = await resp.json();
+
+    const trace1 = {
+        x: data.experiment_curve.map(p => p.time),
+        y: data.experiment_curve.map(p => p.level),
+        mode: 'markers',
+        name: '实验数据',
+        marker: { color: '#e53e3e', size: 8 }
+    };
+
+    const trace2 = {
+        x: data.fitted_curve.map(p => p.time),
+        y: data.fitted_curve.map(p => p.level),
+        mode: 'lines',
+        name: '拟合曲线',
+        line: { color: '#3182ce', width: 2 }
+    };
+
+    const layout = {
+        title: '水位-时间曲线对比',
+        xaxis: { title: '时间 (秒)' },
+        yaxis: { title: '水位 (cm)' },
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 50, r: 20, t: 50, b: 50 }
+    };
+
+    Plotly.newPlot('fitting-plot', [trace1, trace2], layout, { responsive: true });
+}
+
+async function loadComparisonPlot() {
+    const [resp1, resp2] = await Promise.all([
+        fetch(`/api/calibrations/${calibrationId}/error_comparison`),
+        fetch(`/api/candidates/${recommendedSchemeId}/marks`)
+    ]);
+    const compData = await resp1.json();
+    const marksData = await resp2.json();
+
+    const schemes = compData.comparison;
+
+    const trace1 = {
+        x: schemes.map(s => s.name),
+        y: schemes.map(s => s.avg_error),
+        type: 'bar',
+        name: '平均误差',
+        marker: { color: '#3182ce' }
+    };
+
+    const trace2 = {
+        x: schemes.map(s => s.name),
+        y: schemes.map(s => s.max_error),
+        type: 'bar',
+        name: '最大误差',
+        marker: { color: '#e53e3e' }
+    };
+
+    const layout1 = {
+        title: '候选方案误差对比',
+        xaxis: { title: '方案名称' },
+        yaxis: { title: '误差 (秒)' },
+        barmode: 'group',
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 50, r: 20, t: 50, b: 80 }
+    };
+
+    Plotly.newPlot('comparison-plot', [trace1, trace2], layout1, { responsive: true });
+
+    const marks = marksData.marks;
+    const threshold = marksData.error_threshold;
+
+    const trace3 = {
+        x: marks.map(m => m.scale_index),
+        y: marks.map(m => m.error),
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: '刻度误差',
+        line: { color: '#3182ce' },
+        marker: {
+            color: marks.map(m => m.exceeds_threshold ? '#e53e3e' : '#38a169'),
+            size: 8
+        }
+    };
+
+    const trace4 = {
+        x: marks.map(m => m.scale_index),
+        y: marks.map(() => threshold),
+        type: 'line',
+        name: '误差阈值',
+        line: { color: '#d69e2e', dash: 'dash' }
+    };
+
+    const layout2 = {
+        title: '推荐方案各刻度误差分布',
+        xaxis: { title: '刻度序号' },
+        yaxis: { title: '误差 (秒)' },
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 50, r: 20, t: 50, b: 50 }
+    };
+
+    Plotly.newPlot('marks-plot', [trace3, trace4], layout2, { responsive: true });
+}
+
+async function loadWarnings() {
+    const resp = await fetch(`/api/calibrations/${calibrationId}/warning_segments`);
+    const data = await resp.json();
+    const warnings = data.warning_segments;
+
+    const container = document.getElementById('warnings-list');
+
+    if (warnings.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>所有刻度段误差均在阈值范围内，无需预警</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '<div style="margin-bottom: 15px;">' +
+               `<span class="badge badge-danger">共 ${warnings.length} 个超阈值刻度段</span>` +
+               '</div><table><thead><tr>' +
+               '<th>刻度序号</th><th>时间段</th><th>误差</th><th>阈值</th><th>严重程度</th>' +
+               '</tr></thead><tbody>';
+
+    for (const w of warnings) {
+        const severityBadge = w.severity === 'high'
+            ? '<span class="badge badge-danger">高</span>'
+            : '<span class="badge badge-warning">中</span>';
+
+        html += `<tr class="highlight-error">
+            <td>${w.scale_index}</td>
+            <td>${w.start_time.toFixed(2)} - ${w.end_time.toFixed(2)} 秒</td>
+            <td>${w.error.toFixed(4)} 秒</td>
+            <td>${w.threshold.toFixed(2)} 秒</td>
+            <td>${severityBadge}</td>
+        </tr>`;
+    }
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+document.getElementById('review-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const reviewData = {
+        reviewer: document.getElementById('reviewer').value,
+        review_result: document.getElementById('review_result').value,
+        comments: document.getElementById('comments').value
+    };
+
+    try {
+        const resp = await fetch(`/api/calibrations/${calibrationId}/review`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reviewData)
+        });
+
+        const result = await resp.json();
+        if (result.success) {
+            alert('复核提交成功！');
+            location.reload();
+        } else {
+            alert('提交失败，请重试');
+        }
+    } catch (err) {
+        alert('提交失败：' + err.message);
+    }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadFittingPlot();
+});
+</script>
+{% endblock %}

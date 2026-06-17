@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}校准记录 - {{ container.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>校准记录列表</h2>
+    <div>
+        <a href="/containers/{{ container.id }}" class="btn btn-secondary">返回容器详情</a>
+        <a href="/containers/{{ container.id }}/calibrations/new" class="btn btn-primary">新建校准</a>
+    </div>
+</div>
+
+{% if calibrations %}
+<div class="card">
+    <h3>校准记录</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>关联实验</th>
+                <th>RMSE</th>
+                <th>R²</th>
+                <th>状态</th>
+                <th>创建时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cal in calibrations %}
+            <tr>
+                <td>{{ cal.id }}</td>
+                <td>{{ cal.name }}</td>
+                <td>{{ cal.experiment.name if cal.experiment else '-' }}</td>
+                <td>{{ "%.4f"|format(cal.rmse) }}</td>
+                <td>{{ "%.4f"|format(cal.r_squared) }}</td>
+                <td>
+                    {% if cal.status == 'approved' %}
+                    <span class="badge badge-success">已通过</span>
+                    {% elif cal.status == 'rejected' %}
+                    <span class="badge badge-danger">已拒绝</span>
+                    {% elif cal.status == 'needs_revision' %}
+                    <span class="badge badge-warning">需修订</span>
+                    {% else %}
+                    <span class="badge badge-info">已完成</span>
+                    {% endif %}
+                </td>
+                <td>{{ cal.created_at.strftime('%Y-%m-%d %H:%M') if cal.created_at else '-' }}</td>
+                <td>
+                    <div class="table-actions">
+                        <a href="/containers/{{ container.id }}/calibrations/{{ cal.id }}/recommendation"
+                           class="btn btn-sm btn-primary">查看推荐</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card empty-state">
+    <p>暂无校准记录</p>
+    <a href="/containers/{{ container.id }}/calibrations/new" class="btn btn-primary">创建第一个校准</a>
+</div>
+{% endif %}
+{% endblock %}

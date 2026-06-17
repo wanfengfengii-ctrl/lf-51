@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}新建校准 - {{ container.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>新建实验拟合校准</h2>
+    <a href="/containers/{{ container.id }}" class="btn btn-secondary">返回容器详情</a>
+</div>
+
+<div class="card">
+    <h3>校准参数设置</h3>
+    <form method="post" action="/containers/{{ container.id }}/calibrations">
+        <div class="form-group">
+            <label for="name">校准名称</label>
+            <input type="text" id="name" name="name" required
+                   value="{{ form_data.name if form_data else '' }}"
+                   placeholder="请输入校准名称">
+        </div>
+
+        <div class="form-group">
+            <label for="experiment_id">选择实验数据</label>
+            <select id="experiment_id" name="experiment_id" required>
+                <option value="">-- 请选择实验 --</option>
+                {% for exp in experiments %}
+                <option value="{{ exp.id }}"
+                        {% if form_data and form_data.experiment_id == exp.id %}selected{% endif %}>
+                    {{ exp.name }} ({{ exp.data_points|length }} 个数据点)
+                </option>
+                {% endfor %}
+            </select>
+            <div class="help-text">选择用于反向校准容器参数的实验数据</div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="candidate_count">候选方案数量</label>
+                <input type="number" id="candidate_count" name="candidate_count"
+                       min="1" max="20" value="{{ form_data.candidate_count if form_data else 5 }}">
+                <div class="help-text">生成的候选刻度方案数量 (1-20)</div>
+            </div>
+
+            <div class="form-group">
+                <label for="error_threshold">误差阈值 (秒)</label>
+                <input type="number" id="error_threshold" name="error_threshold"
+                       step="0.1" min="0.1" value="{{ form_data.error_threshold if form_data else 5.0 }}">
+                <div class="help-text">超过该误差的刻度将被标记预警</div>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="min_scale_count">最小刻度数</label>
+                <input type="number" id="min_scale_count" name="min_scale_count"
+                       min="1" value="{{ form_data.min_scale_count if form_data else 10 }}">
+                <div class="help-text">候选方案的最小刻度数量</div>
+            </div>
+
+            <div class="form-group">
+                <label for="max_scale_count">最大刻度数</label>
+                <input type="number" id="max_scale_count" name="max_scale_count"
+                       min="1" value="{{ form_data.max_scale_count if form_data else 50 }}">
+                <div class="help-text">候选方案的最大刻度数量</div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="notes">备注说明</label>
+            <textarea id="notes" name="notes" rows="3"
+                      placeholder="可选：添加校准说明或备注">{{ form_data.notes if form_data else '' }}</textarea>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">开始校准并生成方案</button>
+            <a href="/containers/{{ container.id }}" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <h3>校准说明</h3>
+    <div class="info-grid">
+        <div class="info-item">
+            <div class="label">校准原理</div>
+            <div class="value" style="font-size: 13px; font-weight: normal;">
+                使用实验数据通过最小二乘法反向拟合容器参数（出水孔径、流量系数）
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">评估指标</div>
+            <div class="value" style="font-size: 13px; font-weight: normal;">
+                RMSE（均方根误差）、MAE（平均绝对误差）、R²（决定系数）
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">方案排序</div>
+            <div class="value" style="font-size: 13px; font-weight: normal;">
+                按平均误差 → 最大误差 → 超阈值数量综合排序
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -90,6 +90,37 @@
 </div>
 
 <div class="page-header" style="margin-top: 30px;">
+    <h3>实验拟合校准</h3>
+    <div>
+        <a href="/containers/{{ container.id }}/calibrations" class="btn btn-secondary">校准记录</a>
+        <a href="/containers/{{ container.id }}/calibrations/new" class="btn btn-warning">+ 新建校准</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="info-grid">
+        <div class="info-item">
+            <div class="label">功能说明</div>
+            <div class="value" style="font-size: 13px; font-weight: normal; line-height: 1.5;">
+                使用实验数据反向校准容器参数，自动生成多组候选刻度方案并按误差智能排序，支持超阈值预警和复核流程。
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">校准参数</div>
+            <div class="value" style="font-size: 13px; font-weight: normal; line-height: 1.5;">
+                出水孔径、流量系数、流速模型参数
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">输出内容</div>
+            <div class="value" style="font-size: 13px; font-weight: normal; line-height: 1.5;">
+                拟合曲线、误差对比、推荐方案、预警信息、版本记录
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-header" style="margin-top: 30px;">
     <h3>刻度方案</h3>
     <div>
         <a href="/containers/{{ container.id }}/compare" class="btn btn-success">方案对比</a>
