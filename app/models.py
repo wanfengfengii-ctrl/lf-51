@@ -208,6 +208,7 @@ class SeriesTimeScheme(Base):
     name = Column(String(200), nullable=False)
     shichen_count = Column(Integer, nullable=False, default=12)
     dynasty_format = Column(String(50), nullable=True)
+    error_threshold = Column(Float, nullable=False, default=30.0)
     total_duration = Column(Float, nullable=False)
     total_error = Column(Float, nullable=False, default=0.0)
     avg_error = Column(Float, nullable=False, default=0.0)

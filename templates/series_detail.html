@@ -25,12 +25,12 @@
 {% endif %}
 
 <div class="tabs">
-    <a href="#stages" class="tab active" onclick="switchTab('stages')">系统结构</a>
-    <a href="#simulate" class="tab" onclick="switchTab('simulate')">模拟计时</a>
+    <a href="#stages" class="tab active" data-tab="stages" onclick="switchTab('stages'); return false;">系统结构</a>
+    <a href="#simulate" class="tab" data-tab="simulate" onclick="switchTab('simulate'); return false;">模拟计时</a>
     {% if active_scheme %}
-    <a href="#results" class="tab" onclick="switchTab('results')">模拟结果</a>
+    <a href="#results" class="tab" data-tab="results" onclick="switchTab('results'); return false;">模拟结果</a>
     {% endif %}
-    <a href="#schemes" class="tab" onclick="switchTab('schemes')">历史方案</a>
+    <a href="#schemes" class="tab" data-tab="schemes" onclick="switchTab('schemes'); return false;">历史方案</a>
 </div>
 
 <div id="tab-stages" class="tab-content">
@@ -389,7 +389,8 @@ function switchTab(name) {
     document.querySelectorAll('.tab-content').forEach(function(el) { el.style.display = 'none'; });
     document.querySelectorAll('.tab').forEach(function(el) { el.classList.remove('active'); });
     document.getElementById('tab-' + name).style.display = 'block';
-    event.target.classList.add('active');
+    var activeTab = document.querySelector('.tab[data-tab="' + name + '"]');
+    if (activeTab) activeTab.classList.add('active');
 }
 
 {% if active_scheme %}

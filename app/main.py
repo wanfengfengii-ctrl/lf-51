@@ -1064,11 +1064,42 @@ async def list_series_systems(request: Request, db: Session = Depends(get_db)):
     })
 
 
+def _container_to_dict(c: models.Container) -> Dict[str, Any]:
+    return {
+        "id": c.id,
+        "name": c.name,
+        "shape": c.shape,
+        "capacity": c.capacity,
+        "orifice_diameter": c.orifice_diameter,
+        "initial_water_level": c.initial_water_level,
+        "shape_params": c.shape_params,
+        "description": c.description
+    }
+
+
+def _stage_to_dict(s: models.SeriesStage) -> Dict[str, Any]:
+    return {
+        "id": s.id,
+        "stage_order": s.stage_order,
+        "stage_name": s.stage_name,
+        "container_id": s.container_id,
+        "container": _container_to_dict(s.container) if s.container else None,
+        "discharge_coefficient": s.discharge_coefficient,
+        "is_refill_enabled": s.is_refill_enabled,
+        "refill_trigger_level": s.refill_trigger_level,
+        "refill_target_level": s.refill_target_level,
+        "initial_level_override": s.initial_level_override,
+        "orifice_diameter_override": s.orifice_diameter_override,
+    }
+
+
 @app.get("/series/new", response_class=HTMLResponse)
 async def new_series_form(request: Request, db: Session = Depends(get_db)):
     containers = db.query(models.Container).order_by(models.Container.created_at.desc()).all()
+    container_dicts = [_container_to_dict(c) for c in containers]
     return templates.TemplateResponse("series_form.html", {
-        "request": request, "system": None, "containers": containers
+        "request": request, "system": None, "containers": container_dicts,
+        "stages": [], "form_data": None
     })
 
 
@@ -1110,9 +1141,10 @@ async def create_series_system(
 
     if errors:
         containers = db.query(models.Container).order_by(models.Container.created_at.desc()).all()
+        container_dicts = [_container_to_dict(c) for c in containers]
         return templates.TemplateResponse("series_form.html", {
-            "request": request, "system": None, "containers": containers,
-            "errors": errors, "form_data": {
+            "request": request, "system": None, "containers": container_dicts,
+            "stages": [], "errors": errors, "form_data": {
                 "name": name, "dynasty": dynasty or "",
                 "description": description or "",
                 "enable_temp_effect": enable_temp_effect,
@@ -1200,8 +1232,11 @@ async def edit_series_form(request: Request, system_id: int, db: Session = Depen
     if not system:
         raise HTTPException(status_code=404, detail="串联系统不存在")
     containers = db.query(models.Container).order_by(models.Container.created_at.desc()).all()
+    container_dicts = [_container_to_dict(c) for c in containers]
+    stage_dicts = [_stage_to_dict(s) for s in sorted(system.stages, key=lambda x: x.stage_order)]
     return templates.TemplateResponse("series_form.html", {
-        "request": request, "system": system, "containers": containers
+        "request": request, "system": system, "containers": container_dicts,
+        "stages": stage_dicts, "form_data": None
     })
 
 
@@ -1245,9 +1280,11 @@ async def update_series_system(
 
     if errors:
         containers = db.query(models.Container).order_by(models.Container.created_at.desc()).all()
+        container_dicts = [_container_to_dict(c) for c in containers]
+        stage_dicts = [_stage_to_dict(s) for s in sorted(system.stages, key=lambda x: x.stage_order)]
         return templates.TemplateResponse("series_form.html", {
-            "request": request, "system": system, "containers": containers,
-            "errors": errors, "form_data": {
+            "request": request, "system": system, "containers": container_dicts,
+            "stages": stage_dicts, "errors": errors, "form_data": {
                 "name": name, "dynasty": dynasty or "",
                 "description": description or "",
                 "enable_temp_effect": enable_temp_effect,
@@ -1384,6 +1421,7 @@ async def run_series_simulation(
         name=name,
         shichen_count=shichen_count,
         dynasty_format=dynasty_format,
+        error_threshold=error_threshold,
         total_duration=sim["total_duration"],
         total_error=scheme_result["total_error"],
         avg_error=scheme_result["avg_error"],
@@ -1488,6 +1526,7 @@ async def api_series_scheme_data(scheme_id: int, db: Session = Depends(get_db)):
         "name": scheme.name,
         "shichen_count": scheme.shichen_count,
         "dynasty_format": scheme.dynasty_format,
+        "error_threshold": scheme.error_threshold,
         "total_duration": scheme.total_duration,
         "total_error": scheme.total_error,
         "avg_error": scheme.avg_error,

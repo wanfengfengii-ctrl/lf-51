@@ -76,8 +76,8 @@
 
 <script>
     var availableContainers = {{ containers|tojson|safe }};
-    {% if system %}
-    var existingStages = {{ system.stages|sort(attribute='stage_order')|tojson|safe }};
+    {% if stages %}
+    var existingStages = {{ stages|tojson|safe }};
     {% else %}
     var existingStages = [];
     {% endif %}
